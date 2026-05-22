@@ -3,6 +3,7 @@
   <ItemGroup>
     <ProjectReference Include="..\JuliMvs.App\JuliMvs.App.csproj" />
     <ProjectReference Include="..\JuliMvs.Core\JuliMvs.Core.csproj" />
+    <ProjectReference Include="..\JuliMvs.Vision\JuliMvs.Vision.csproj" />
   </ItemGroup>
 
   <PropertyGroup>

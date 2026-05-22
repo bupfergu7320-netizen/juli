@@ -3,6 +3,8 @@ using JuliMvs.Core.Camera;
 using JuliMvs.Core.Inspection;
 using JuliMvs.Core.Vision;
 using JuliMvs.Plc;
+using JuliMvs.Vision;
+using OpenCvSharp;
 using System.Text.Json;
 
 VerifyOldPublishedDataPathResolvesUnderCurrentBaseDirectory();
@@ -14,6 +16,7 @@ VerifyProductionOkDoesNotSaveImages();
 VerifyProductionNgSavesOnlyDiagnosticImage();
 VerifyManualInspectionKeepsExistingImageBehavior();
 VerifyClearCalibrationDisablesAllCalibrationButKeepsProductionSettings();
+VerifyCalibrationBoardDetectionPrefersLowestRmsGrid();
 
 Console.WriteLine("App services keep template images portable, local settings backward-compatible, production image saving limited, and calibration clearing safe.");
 
@@ -204,6 +207,52 @@ static void VerifyClearCalibrationDisablesAllCalibrationButKeepsProductionSettin
     AssertDoubleEqual(1.2, cleared.PlcOutputTransform?.Yy ?? 0, "kept PLC Yy");
 }
 
+static void VerifyCalibrationBoardDetectionPrefersLowestRmsGrid()
+{
+    using var image = new Mat(new Size(640, 480), MatType.CV_8UC1, Scalar.Black);
+    Cv2.Rectangle(image, new Rect(120, 80, 380, 320), Scalar.White, -1);
+    Cv2.Rectangle(image, new Rect(170, 115, 280, 280), new Scalar(40), 8);
+
+    for (var row = 0; row < 7; row++)
+    {
+        for (var column = 0; column < 7; column++)
+        {
+            Cv2.Circle(
+                image,
+                new Point(205 + column * 35, 150 + row * 35),
+                11,
+                Scalar.Black,
+                -1);
+        }
+    }
+
+    var interferencePoints = new[]
+    {
+        new Point(48, 42),
+        new Point(585, 52),
+        new Point(52, 428),
+        new Point(582, 420),
+        new Point(80, 118),
+        new Point(548, 138),
+        new Point(92, 310),
+        new Point(530, 302)
+    };
+    foreach (var point in interferencePoints)
+    {
+        Cv2.Circle(image, point, 17, Scalar.White, -1);
+        Cv2.Circle(image, point, 10, Scalar.Black, -1);
+    }
+
+    var service = new CalibrationBoardVisionService();
+    using var result = service.DetectCircleGrid(image, rows: 7, columns: 7, spacingMm: 10.0);
+
+    AssertIntEqual(49, result.DetectedPointCount, "detected calibration board points");
+    AssertBoolEqual(result.RmsErrorPixels < 0.001, true, "calibration board RMS");
+    AssertBoolEqual(result.XyDifferencePercent < 0.001, true, "calibration board XY difference");
+    AssertDoubleEqual(205, result.Points[0].X, "top-left calibration X");
+    AssertDoubleEqual(150, result.Points[0].Y, "top-left calibration Y");
+}
+
 static string CreateTempDirectory()
 {
     var path = Path.Combine(Path.GetTempPath(), "JuliMvs.App.Tests", Guid.NewGuid().ToString("N"));
@@ -220,6 +269,14 @@ static void AssertEqual(string? expected, string? actual, string name)
 }
 
 static void AssertBoolEqual(bool expected, bool actual, string name)
+{
+    if (expected != actual)
+    {
+        throw new InvalidOperationException($"{name}: expected '{expected}', actual '{actual}'");
+    }
+}
+
+static void AssertIntEqual(int expected, int actual, string name)
 {
     if (expected != actual)
     {

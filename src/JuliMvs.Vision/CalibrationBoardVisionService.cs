@@ -34,6 +34,7 @@ public sealed class CalibrationBoardVisionService
                 .ToList();
 
             var orderingError = string.Empty;
+            var candidateResults = new List<BoardDetectionCandidate>();
             foreach (var attempt in attempts)
             {
                 var selected = attempt.Candidates
@@ -49,20 +50,41 @@ public sealed class CalibrationBoardVisionService
                 try
                 {
                     var grid = OrderGridPoints(selected, rows, columns);
-                    return BuildResult(
-                        image,
+                    candidateResults.Add(new BoardDetectionCandidate(
                         grid,
-                        rows,
-                        columns,
-                        spacingMm,
-                        expectedCount,
+                        CalculateGridMetrics(grid, spacingMm),
                         attempt.Name,
-                        attempt.BoardMask.Region);
+                        attempt.BoardMask.Region,
+                        attempt.BoardMask.IsFullImage,
+                        attempt.Candidates.Count,
+                        attempt.Score));
                 }
                 catch (InvalidOperationException ex)
                 {
                     orderingError = ex.Message;
                 }
+            }
+
+            if (candidateResults.Count > 0)
+            {
+                var best = candidateResults
+                    .OrderBy(candidate => candidate.Metrics.RmsErrorPixels)
+                    .ThenBy(candidate => candidate.Metrics.XyDifferencePercent)
+                    .ThenBy(candidate => candidate.IsFullImage ? 1 : 0)
+                    .ThenByDescending(candidate => candidate.CandidateCount)
+                    .ThenByDescending(candidate => candidate.AttemptScore)
+                    .First();
+
+                return BuildResult(
+                    image,
+                    best.Grid,
+                    rows,
+                    columns,
+                    spacingMm,
+                    expectedCount,
+                    best.DetectionMode,
+                    best.BoardRegion,
+                    best.Metrics);
             }
 
             var bestAttempt = attempts.FirstOrDefault();
@@ -106,6 +128,84 @@ public sealed class CalibrationBoardVisionService
         string detectionMode,
         Rect boardRegion)
     {
+        var metrics = CalculateGridMetrics(grid, spacingMm);
+        var orderedPoints = grid.SelectMany(row => row).ToList();
+        var diagnostic = DrawSuccessPreview(
+            image,
+            grid,
+            metrics.PixelPerMmX,
+            metrics.PixelPerMmY,
+            metrics.PixelPerMm,
+            metrics.XyDifferencePercent,
+            metrics.RmsErrorPixels,
+            metrics.BoardAngleDegrees,
+            detectionMode,
+            boardRegion);
+
+        return new CalibrationBoardDetectionResult(
+            rows,
+            columns,
+            spacingMm,
+            expectedCount,
+            orderedPoints.Count,
+            metrics.PixelPerMmX,
+            metrics.PixelPerMmY,
+            metrics.PixelPerMm,
+            metrics.XyDifferencePercent,
+            metrics.RmsErrorPixels,
+            metrics.BoardAngleDegrees,
+            orderedPoints,
+            diagnostic,
+            detectionMode);
+    }
+
+    private static CalibrationBoardDetectionResult BuildResult(
+        Mat image,
+        IReadOnlyList<IReadOnlyList<Point2d>> grid,
+        int rows,
+        int columns,
+        double spacingMm,
+        int expectedCount,
+        string detectionMode,
+        Rect boardRegion,
+        GridMetrics metrics)
+    {
+        var orderedPoints = grid.SelectMany(row => row).ToList();
+        var diagnostic = DrawSuccessPreview(
+            image,
+            grid,
+            metrics.PixelPerMmX,
+            metrics.PixelPerMmY,
+            metrics.PixelPerMm,
+            metrics.XyDifferencePercent,
+            metrics.RmsErrorPixels,
+            metrics.BoardAngleDegrees,
+            detectionMode,
+            boardRegion);
+
+        return new CalibrationBoardDetectionResult(
+            rows,
+            columns,
+            spacingMm,
+            expectedCount,
+            orderedPoints.Count,
+            metrics.PixelPerMmX,
+            metrics.PixelPerMmY,
+            metrics.PixelPerMm,
+            metrics.XyDifferencePercent,
+            metrics.RmsErrorPixels,
+            metrics.BoardAngleDegrees,
+            orderedPoints,
+            diagnostic,
+            detectionMode);
+    }
+
+    private static GridMetrics CalculateGridMetrics(
+        IReadOnlyList<IReadOnlyList<Point2d>> grid,
+        double spacingMm)
+    {
+        var rows = grid.Count;
+        var columns = grid[0].Count;
         var horizontalDistances = new List<double>();
         var verticalDistances = new List<double>();
         for (var row = 0; row < rows; row++)
@@ -130,36 +230,20 @@ public sealed class CalibrationBoardVisionService
         var pixelPerMmY = averageVerticalPixels / spacingMm;
         var pixelPerMm = (pixelPerMmX + pixelPerMmY) / 2.0;
         var xyDifferencePercent = Math.Abs(pixelPerMmX - pixelPerMmY) / Math.Max(pixelPerMm, 0.0001) * 100.0;
-        var rmsErrorPixels = CalculateDistanceRms(horizontalDistances, averageHorizontalPixels, verticalDistances, averageVerticalPixels);
+        var rmsErrorPixels = CalculateDistanceRms(
+            horizontalDistances,
+            averageHorizontalPixels,
+            verticalDistances,
+            averageVerticalPixels);
         var boardAngleDegrees = CalculateBoardAngleDegrees(grid);
-        var orderedPoints = grid.SelectMany(row => row).ToList();
-        var diagnostic = DrawSuccessPreview(
-            image,
-            grid,
-            pixelPerMmX,
-            pixelPerMmY,
-            pixelPerMm,
-            xyDifferencePercent,
-            rmsErrorPixels,
-            boardAngleDegrees,
-            detectionMode,
-            boardRegion);
 
-        return new CalibrationBoardDetectionResult(
-            rows,
-            columns,
-            spacingMm,
-            expectedCount,
-            orderedPoints.Count,
+        return new GridMetrics(
             pixelPerMmX,
             pixelPerMmY,
             pixelPerMm,
             xyDifferencePercent,
             rmsErrorPixels,
-            boardAngleDegrees,
-            orderedPoints,
-            diagnostic,
-            detectionMode);
+            boardAngleDegrees);
     }
 
     private static IReadOnlyList<BoardMask> FindBoardMasks(Mat gray)
@@ -836,6 +920,23 @@ public sealed class CalibrationBoardVisionService
         BoardMask BoardMask,
         IReadOnlyList<DotCandidate> Candidates,
         double Score);
+
+    private sealed record BoardDetectionCandidate(
+        List<List<Point2d>> Grid,
+        GridMetrics Metrics,
+        string DetectionMode,
+        Rect BoardRegion,
+        bool IsFullImage,
+        int CandidateCount,
+        double AttemptScore);
+
+    private sealed record GridMetrics(
+        double PixelPerMmX,
+        double PixelPerMmY,
+        double PixelPerMm,
+        double XyDifferencePercent,
+        double RmsErrorPixels,
+        double BoardAngleDegrees);
 
     private sealed record ThresholdImage(string Name, Mat Binary) : IDisposable
     {
