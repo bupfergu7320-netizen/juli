@@ -2848,6 +2848,11 @@ public sealed class OpenCvVisionService
             _ => Scalar.OrangeRed
         };
 
+        if (decision == InspectionDecision.Ng)
+        {
+            DrawLargeNgMarker(diagnostic);
+        }
+
         Cv2.PutText(diagnostic, decision.ToString(), new Point(24, 44), HersheyFonts.HersheySimplex, 1.1, color, 2);
         Cv2.PutText(diagnostic, message, new Point(24, 84), HersheyFonts.HersheySimplex, 0.7, color, 2);
         Cv2.PutText(
@@ -2893,5 +2898,24 @@ public sealed class OpenCvVisionService
                 Scalar.White,
                 2);
         }
+    }
+
+    private static void DrawLargeNgMarker(Mat diagnostic)
+    {
+        const string text = "NG";
+        var fontScale = Math.Clamp(diagnostic.Width / 900.0, 3.6, 7.0);
+        var thickness = Math.Max(8, (int)Math.Round(fontScale * 2.0));
+        var padding = Math.Max(24, (int)Math.Round(fontScale * 8.0));
+        var baseline = 0;
+        var textSize = Cv2.GetTextSize(text, HersheyFonts.HersheySimplex, fontScale, thickness, out baseline);
+        var origin = new Point(padding, padding + textSize.Height);
+        var boxEnd = new Point(
+            origin.X + textSize.Width + padding,
+            origin.Y + baseline + padding);
+
+        Cv2.Rectangle(diagnostic, new Point(0, 0), boxEnd, Scalar.Black, -1);
+        Cv2.Rectangle(diagnostic, new Point(0, 0), boxEnd, Scalar.Red, Math.Max(4, thickness / 2));
+        Cv2.PutText(diagnostic, text, origin, HersheyFonts.HersheySimplex, fontScale, Scalar.White, thickness + 8);
+        Cv2.PutText(diagnostic, text, origin, HersheyFonts.HersheySimplex, fontScale, Scalar.Red, thickness);
     }
 }
