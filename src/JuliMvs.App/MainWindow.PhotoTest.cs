@@ -91,22 +91,33 @@ public partial class MainWindow
             detailsBox.Text = "正在拍照测试...";
             try
             {
-                var run = await CaptureAndRunPhotoTestAsync();
-                if (run.ResultImagePath is not null)
+                var test = await CaptureAndRunPhotoTestAsync();
+                if (test.Run is { } run)
                 {
-                    SetImage(previewImage, run.ResultImagePath);
-                    SetImage(ResultImage, run.ResultImagePath);
+                    if (run.ResultImagePath is not null)
+                    {
+                        SetImage(previewImage, run.ResultImagePath);
+                        SetImage(ResultImage, run.ResultImagePath);
+                    }
+                    else
+                    {
+                        previewImage.Source = CreateBitmapImageFromMat(run.Output.DiagnosticImage);
+                        ResultImage.Source = previewImage.Source;
+                    }
+
+                    detailsBox.Text = BuildPhotoTestDetails(run);
+                    MessageText.Text = $"\u62cd\u7167\u6d4b\u8bd5\u5b8c\u6210: {run.Result.Decision}, PLC\u9884\u89c8\u4e0d\u5199\u5165\u3002";
+                    Log(MessageText.Text);
+                    LogPhotoTestSummary(run);
                 }
                 else
                 {
-                    previewImage.Source = CreateBitmapImageFromMat(run.Output.DiagnosticImage);
-                    ResultImage.Source = previewImage.Source;
+                    SetImage(previewImage, test.RawImagePath);
+                    SetImage(ResultImage, test.RawImagePath);
+                    detailsBox.Text = BuildPhotoOnlyTestDetails(test);
+                    MessageText.Text = "\u62cd\u7167\u6d4b\u8bd5\u5df2\u5b8c\u6210\uff1a\u4ec5\u62cd\u7167\u9884\u89c8\uff0c\u4e0d\u505a\u68c0\u6d4b\u548cPLC\u9884\u89c8\u3002";
+                    Log($"{MessageText.Text} {test.SkipReason}");
                 }
-
-                detailsBox.Text = BuildPhotoTestDetails(run);
-                MessageText.Text = $"拍照测试完成: {run.Result.Decision}, PLC预览不写入。";
-                Log(MessageText.Text);
-                LogPhotoTestSummary(run);
             }
             catch (Exception ex)
             {
@@ -125,32 +136,55 @@ public partial class MainWindow
         dialog.Show();
     }
 
-    private async Task<InspectionRunResult> CaptureAndRunPhotoTestAsync()
+    private sealed record PhotoTestCaptureResult(
+        string RawImagePath,
+        string? SkipReason,
+        InspectionRunResult? Run);
+
+    private async Task<PhotoTestCaptureResult> CaptureAndRunPhotoTestAsync()
     {
         if (!_cameraConnected)
         {
             throw new InvalidOperationException("相机未连接，无法拍照测试。");
         }
 
-        if (_template is null)
+        var rawImagePath = await CaptureCameraImageAsync(saveImage: true);
+        if (string.IsNullOrWhiteSpace(rawImagePath))
         {
-            throw new InvalidOperationException("未加载模板。请先换型并拍照设标准位/模板。");
+            throw new InvalidOperationException("拍照测试保存图片失败，未生成原图路径。");
         }
 
-        RequireMachineCalibrationReady();
+        _lastRawImagePath = rawImagePath;
+        var skipReasons = new List<string>();
+        if (_template is null)
+        {
+            skipReasons.Add("未加载标准位/模板");
+        }
 
-        var rawImagePath = await CaptureCameraImageAsync(saveImage: true);
+        if (!IsMachineCalibrationReady(out var calibrationMessage))
+        {
+            skipReasons.Add($"机器标定未完成: {calibrationMessage}");
+        }
+
+        if (skipReasons.Count > 0)
+        {
+            return new PhotoTestCaptureResult(
+                rawImagePath,
+                "仅拍照预览，跳过检测原因: " + string.Join("; ", skipReasons),
+                null);
+        }
+
         var activeParameters = ReadVisionParameters();
         var fixedOverlayPath = CreateFrontBackOverlayDiagnosticPath();
         var frontBackDebug = _visionService.AnalyzeFrontBackDebug(
             _lastCameraImage!,
-            _template,
+            _template!,
             activeParameters,
             fixedOverlayPath);
         var run = await _inspectionRunCoordinator.RunAsync(new InspectionRunRequest(
             _lastCameraImage!,
             rawImagePath,
-            _template,
+            _template!,
             activeParameters,
             "拍照测试",
             WriteToPlc: false,
@@ -166,8 +200,7 @@ public partial class MainWindow
         }
 
         _lastInspectionResult = run.Result;
-        _lastRawImagePath = rawImagePath;
-        return run;
+        return new PhotoTestCaptureResult(rawImagePath, null, run);
     }
 
     private static string CreateFrontBackOverlayDiagnosticPath()
@@ -199,6 +232,37 @@ public partial class MainWindow
             $"PLC: {(_plcClient?.IsConnected == true ? "已连接" : "未连接")}\n" +
             $"模板: {templateText}\n\n" +
             "点击下方“拍照测试”开始。";
+    }
+
+    private string BuildPhotoOnlyTestDetails(PhotoTestCaptureResult test)
+    {
+        var templateText = _template is null
+            ? "未加载"
+            : $"{_template.ProductName} / {_template.BatchNo}";
+        var calibrationText = IsMachineCalibrationReady(out var calibrationMessage)
+            ? "已完成"
+            : $"未完成: {calibrationMessage}";
+        var text = new List<string>
+        {
+            "拍照测试结果",
+            "==============================",
+            "模式: 仅拍照预览",
+            $"原因: {test.SkipReason}",
+            $"原图: {FormatPathForDisplay(test.RawImagePath)}",
+            string.Empty,
+            "当前状态",
+            "------------------------------",
+            $"相机: {(_cameraConnected ? "已连接" : "未连接")}",
+            $"PLC: {(_plcClient?.IsConnected == true ? "已连接" : "未连接")}",
+            $"模板: {templateText}",
+            $"机器标定: {calibrationText}",
+            string.Empty,
+            "说明",
+            "------------------------------",
+            "本次只保存并显示相机原图，不做工件检测，不生成PLC预览，也不写PLC。",
+            "模板和机器标定都准备好后，再点拍照测试会自动恢复完整检测预览。"
+        };
+        return string.Join(Environment.NewLine, text);
     }
 
     private string BuildPhotoTestDetails(InspectionRunResult run)
