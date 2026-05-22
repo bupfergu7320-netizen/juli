@@ -15,6 +15,8 @@ namespace JuliMvs.App;
 
 public partial class MainWindow
 {
+    private const int ProductionPreviewMaxPixels = 1600;
+
     private static BitmapImage CreateBitmapImageFromMat(Mat image)
     {
         Cv2.ImEncode(".bmp", image, out var buffer);
@@ -26,6 +28,24 @@ public partial class MainWindow
         bitmap.EndInit();
         bitmap.Freeze();
         return bitmap;
+    }
+
+    private static BitmapImage CreatePreviewBitmapImageFromMat(Mat image)
+    {
+        if (image.Width <= ProductionPreviewMaxPixels && image.Height <= ProductionPreviewMaxPixels)
+        {
+            return CreateBitmapImageFromMat(image);
+        }
+
+        var scale = Math.Min(
+            (double)ProductionPreviewMaxPixels / image.Width,
+            (double)ProductionPreviewMaxPixels / image.Height);
+        var previewSize = new OpenCvSharp.Size(
+            Math.Max(1, (int)Math.Round(image.Width * scale)),
+            Math.Max(1, (int)Math.Round(image.Height * scale)));
+        using var preview = new Mat();
+        Cv2.Resize(image, preview, previewSize, 0, 0, InterpolationFlags.Area);
+        return CreateBitmapImageFromMat(preview);
     }
 
     private static Mat DrawCalibrationPreview(Mat image, PartDetection detection, string pointName)

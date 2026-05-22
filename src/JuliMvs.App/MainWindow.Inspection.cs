@@ -246,7 +246,8 @@ public partial class MainWindow
             _plcClient?.IsConnected == true,
             _plcIpAddress,
             _plcPort,
-            GetEffectivePlcOutputTransform()));
+            GetEffectivePlcOutputTransform(),
+            BuildDiagnosticImage: !writeToPlc));
         inspectionStopwatch.Stop();
 
         var result = run.Result;
@@ -264,6 +265,10 @@ public partial class MainWindow
         {
             SetImage(ResultImage, run.ResultImagePath);
         }
+        else if (writeToPlc && result.Decision == InspectionDecision.Ok)
+        {
+            ResultImage.Source = CreatePreviewBitmapImageFromMat(image);
+        }
         else
         {
             ResultImage.Source = CreateBitmapImageFromMat(output.DiagnosticImage);
@@ -276,17 +281,22 @@ public partial class MainWindow
         }
 
         Log($"{logPrefix}: {result.Decision}: {result.Message}");
-        if (run.ReportPath is not null)
+        var writeVerboseInspectionLog = !writeToPlc || result.Decision != InspectionDecision.Ok;
+        if (writeVerboseInspectionLog)
         {
-            Log($"检测诊断报告已保存: {run.ReportPath}");
+            if (run.ReportPath is not null)
+            {
+                Log($"检测诊断报告已保存: {run.ReportPath}");
+            }
+            else if (run.ReportError is not null)
+            {
+                Log($"检测诊断报告保存失败: {run.ReportError}");
+            }
+
+            Log(_inspectionDiagnosticMessageFormatter.BuildCandidateDiagnosticsText(output.CandidateDiagnostics));
+            Log(_inspectionDiagnosticMessageFormatter.BuildAngleCandidatesText(output.AngleDiagnostic));
+            LogPlcOutputPreview(result, output.AlignmentSnapshot);
         }
-        else if (run.ReportError is not null)
-        {
-            Log($"检测诊断报告保存失败: {run.ReportError}");
-        }
-        Log(_inspectionDiagnosticMessageFormatter.BuildCandidateDiagnosticsText(output.CandidateDiagnostics));
-        Log(_inspectionDiagnosticMessageFormatter.BuildAngleCandidatesText(output.AngleDiagnostic));
-        LogPlcOutputPreview(result, output.AlignmentSnapshot);
         var plcStopwatch = Stopwatch.StartNew();
         if (writeToPlc)
         {
@@ -314,7 +324,8 @@ public partial class MainWindow
             inspectionStopwatch.ElapsedMilliseconds,
             renderStopwatch.ElapsedMilliseconds,
             plcStopwatch.ElapsedMilliseconds,
-            totalStopwatch.ElapsedMilliseconds);
+            totalStopwatch.ElapsedMilliseconds,
+            run.Timings);
     }
 
     private async Task WritePlcResultIfConnectedAsync(InspectionResult result)
@@ -394,11 +405,13 @@ public partial class MainWindow
         long inspectionElapsedMilliseconds,
         long renderElapsedMilliseconds,
         long plcElapsedMilliseconds,
-        long totalElapsedMilliseconds)
+        long totalElapsedMilliseconds,
+        InspectionRunTimings timings)
     {
         AddRuntimeLogLines(
             $"结果: {result.Decision}  原因: {FormatNgReason(result)}",
             $"耗时: 总{totalElapsedMilliseconds}ms  拍照{captureElapsedMilliseconds}ms  检测/存储{inspectionElapsedMilliseconds}ms  显示{renderElapsedMilliseconds}ms  PLC{plcElapsedMilliseconds}ms",
+            $"\u660e\u7ec6: \u89c6\u89c9{timings.VisionMs}ms  \u8bb0\u5f55{timings.SaveResultMs}ms  \u56fe{timings.SaveDiagnosticImageMs}ms  \u62a5\u544a{timings.SaveReportMs}ms",
             FormatRuntimeXyrLine(result));
     }
 

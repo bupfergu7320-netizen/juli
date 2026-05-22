@@ -205,7 +205,8 @@ public sealed class OpenCvVisionService
         PartTemplate template,
         VisionParameters? parameters = null,
         string? partNo = null,
-        string? rawImagePath = null)
+        string? rawImagePath = null,
+        bool buildDiagnosticImage = true)
     {
         ArgumentNullException.ThrowIfNull(image);
         ArgumentNullException.ThrowIfNull(template);
@@ -213,13 +214,14 @@ public sealed class OpenCvVisionService
         var activeParameters = parameters ?? template.Parameters;
         EnsureProductionSetup(image, template, activeParameters);
         using var workingImage = PrepareImage(image, activeParameters);
-        var diagnostic = EnsureBgr(workingImage);
+        var diagnostic = buildDiagnosticImage ? EnsureBgr(workingImage) : new Mat();
         var detection = DetectPartPrepared(
             workingImage,
             activeParameters,
             template,
             out var candidateDiagnostics,
-            out var candidateDetections);
+            out var candidateDetections,
+            buildDiagnostics: buildDiagnosticImage);
         var resolvedPartNo = string.IsNullOrWhiteSpace(partNo)
             ? DateTimeOffset.Now.ToString("yyyyMMddHHmmssfff")
             : partNo;
@@ -231,14 +233,21 @@ public sealed class OpenCvVisionService
                 resolvedPartNo,
                 NgReason.MatchFailed,
                 "No valid workpiece contour was found.");
-            Cv2.PutText(diagnostic, "MATCH FAILED", new Point(24, 48), HersheyFonts.HersheySimplex, 1.2, Scalar.Red, 2);
+            if (buildDiagnosticImage)
+            {
+                Cv2.PutText(diagnostic, "MATCH FAILED", new Point(24, 48), HersheyFonts.HersheySimplex, 1.2, Scalar.Red, 2);
+            }
+
             return new OpenCvInspectionOutput(error, diagnostic, candidateDiagnostics: candidateDiagnostics);
         }
 
-        DrawCandidateContours(diagnostic, candidateDetections, detection);
-        var contourForDraw = OffsetContour(detection.Contour, detection.Offset);
-        Cv2.DrawContours(diagnostic, new[] { contourForDraw }, -1, Scalar.LimeGreen, 2);
-        DrawCenterMarkers(diagnostic, detection, template);
+        if (buildDiagnosticImage)
+        {
+            DrawCandidateContours(diagnostic, candidateDetections, detection);
+            var contourForDraw = OffsetContour(detection.Contour, detection.Offset);
+            Cv2.DrawContours(diagnostic, new[] { contourForDraw }, -1, Scalar.LimeGreen, 2);
+            DrawCenterMarkers(diagnostic, detection, template);
+        }
 
         var referenceCenter = GetReferenceCenterMachine(template, activeParameters);
         var currentCenter = activeParameters.CameraCalibration.PixelToMachine(detection.CenterXPixel, detection.CenterYPixel);
@@ -304,7 +313,10 @@ public sealed class OpenCvVisionService
             detection.AreaPixels,
             matchScore);
 
-        DrawOverlay(diagnostic, decision, message, measurement, angleDiagnostic, similarity);
+        if (buildDiagnosticImage)
+        {
+            DrawOverlay(diagnostic, decision, message, measurement, angleDiagnostic, similarity);
+        }
 
         var result = InspectionResult.FromMeasurement(
             template.BatchNo,
@@ -328,7 +340,7 @@ public sealed class OpenCvVisionService
     public PartDetection? DetectPart(Mat image, VisionParameters parameters)
     {
         using var workingImage = PrepareImage(image, parameters);
-        return DetectPartPrepared(workingImage, parameters, template: null, out _, out _);
+        return DetectPartPrepared(workingImage, parameters, template: null, out _, out _, buildDiagnostics: false);
     }
 
     public FrontBackDebugResult? AnalyzeFrontBackDebug(
@@ -413,7 +425,8 @@ public sealed class OpenCvVisionService
         VisionParameters parameters,
         PartTemplate? template,
         out IReadOnlyList<ContourCandidateDiagnostic> candidateDiagnostics,
-        out IReadOnlyList<PartDetection> candidateDetections)
+        out IReadOnlyList<PartDetection> candidateDetections,
+        bool buildDiagnostics = true)
     {
         using var roiImage = ExtractRoi(image, parameters.Roi, out var offset);
         using var gray = ToGray(roiImage);
@@ -427,8 +440,12 @@ public sealed class OpenCvVisionService
             .ToList();
         var selected = SelectDetectionCandidate(candidates, template);
 
-        candidateDiagnostics = BuildCandidateDiagnostics(candidates, template, selected);
-        candidateDetections = candidates.Select(candidate => candidate.Detection).ToArray();
+        candidateDiagnostics = buildDiagnostics
+            ? BuildCandidateDiagnostics(candidates, template, selected)
+            : Array.Empty<ContourCandidateDiagnostic>();
+        candidateDetections = buildDiagnostics
+            ? candidates.Select(candidate => candidate.Detection).ToArray()
+            : Array.Empty<PartDetection>();
         return selected?.Detection;
     }
 

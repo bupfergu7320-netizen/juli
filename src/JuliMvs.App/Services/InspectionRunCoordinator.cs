@@ -4,6 +4,7 @@ using JuliMvs.Core.Vision;
 using JuliMvs.Plc;
 using JuliMvs.Vision;
 using OpenCvSharp;
+using System.Diagnostics;
 
 namespace JuliMvs.App.Services;
 
@@ -28,25 +29,44 @@ internal sealed class InspectionRunCoordinator
 
     public async Task<InspectionRunResult> RunAsync(InspectionRunRequest request)
     {
+        var partNo = DateTimeOffset.Now.ToString("yyyyMMddHHmmssfff");
+        var visionStopwatch = Stopwatch.StartNew();
         var output = _visionService.Inspect(
             request.Image,
             request.Template,
             request.Parameters,
-            partNo: DateTimeOffset.Now.ToString("yyyyMMddHHmmssfff"),
-            rawImagePath: request.RawImagePath);
+            partNo: partNo,
+            rawImagePath: request.RawImagePath,
+            buildDiagnosticImage: request.BuildDiagnosticImage);
+        if (!request.BuildDiagnosticImage && output.Result.Decision != InspectionDecision.Ok)
+        {
+            output = _visionService.Inspect(
+                request.Image,
+                request.Template,
+                request.Parameters,
+                partNo: partNo,
+                rawImagePath: request.RawImagePath,
+                buildDiagnosticImage: true);
+        }
+
+        visionStopwatch.Stop();
 
         var logs = new List<string>();
         var imageSaveDecision = InspectionImageSavePolicy.Decide(request.WriteToPlc, output.Result.Decision);
         var resultRawImagePath = imageSaveDecision.KeepIncomingRawImagePath ? request.RawImagePath : null;
+        var diagnosticImageStopwatch = Stopwatch.StartNew();
         var resultImagePath = imageSaveDecision.SaveDiagnosticImage
             ? _fileStore.SaveDiagnosticImage(output.DiagnosticImage, request.Template.BatchNo, output.Result.PartNo)
             : null;
+        diagnosticImageStopwatch.Stop();
         var result = output.Result with
         {
             RawImagePath = resultRawImagePath,
             ResultImagePath = resultImagePath
         };
+        var saveResultStopwatch = Stopwatch.StartNew();
         await _repository.SaveResultAsync(result);
+        saveResultStopwatch.Stop();
 
         if (imageSaveDecision.ProductionLogMessage is not null)
         {
@@ -60,6 +80,7 @@ internal sealed class InspectionRunCoordinator
 
         string? reportPath = null;
         string? reportError = null;
+        var reportStopwatch = Stopwatch.StartNew();
         try
         {
             reportPath = _reportWriter.SaveInspectionReport(new InspectionReportContext(
@@ -79,6 +100,7 @@ internal sealed class InspectionRunCoordinator
         {
             reportError = ex.Message;
         }
+        reportStopwatch.Stop();
 
         return new InspectionRunResult(
             result,
@@ -87,6 +109,11 @@ internal sealed class InspectionRunCoordinator
             resultImagePath,
             reportPath,
             reportError,
+            new InspectionRunTimings(
+                visionStopwatch.ElapsedMilliseconds,
+                saveResultStopwatch.ElapsedMilliseconds,
+                diagnosticImageStopwatch.ElapsedMilliseconds,
+                reportStopwatch.ElapsedMilliseconds),
             logs,
             request.FrontBackDebug);
     }
@@ -103,7 +130,8 @@ internal sealed record InspectionRunRequest(
     string PlcHost,
     int PlcPort,
     PlcOutputTransform PlcOutputTransform,
-    FrontBackDebugResult? FrontBackDebug = null);
+    FrontBackDebugResult? FrontBackDebug = null,
+    bool BuildDiagnosticImage = true);
 
 internal sealed record InspectionRunResult(
     InspectionResult Result,
@@ -112,5 +140,12 @@ internal sealed record InspectionRunResult(
     string? ResultImagePath,
     string? ReportPath,
     string? ReportError,
+    InspectionRunTimings Timings,
     IReadOnlyList<string> Logs,
     FrontBackDebugResult? FrontBackDebug = null);
+
+internal sealed record InspectionRunTimings(
+    long VisionMs,
+    long SaveResultMs,
+    long SaveDiagnosticImageMs,
+    long SaveReportMs);
