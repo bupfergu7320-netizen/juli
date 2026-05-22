@@ -69,6 +69,7 @@ public partial class MainWindow
         _currentProductName = productName.Trim();
         _batchSession = BatchSession.Empty();
         _batchSession.Start(batchNo, productName);
+        ResetProductionCounters();
         ClearCurrentInspection();
         _changeoverTemplateRequested = false;
 

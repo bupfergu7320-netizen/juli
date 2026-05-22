@@ -295,6 +295,7 @@
                     <Grid Grid.RowSpan="2" Margin="0">
                         <Grid.RowDefinitions>
                             <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
                             <RowDefinition Height="*" />
                         </Grid.RowDefinitions>
                         <TextBlock x:Name="MessageText"
@@ -303,13 +304,52 @@
                                    FontWeight="Bold"
                                    TextWrapping="Wrap"
                                    Margin="8,8,8,6" />
+                        <Grid Grid.Row="1" Margin="8,0,8,8">
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                            </Grid.RowDefinitions>
+                            <TextBlock Text="生产摘要"
+                                       FontSize="18"
+                                       FontWeight="Bold"
+                                       Foreground="#005A9E"
+                                       Margin="0,0,0,3" />
+                            <TextBlock x:Name="ProductionSummaryText"
+                                       Grid.Row="1"
+                                       Text="型号: -"
+                                       FontSize="22"
+                                       FontWeight="Bold"
+                                       TextWrapping="Wrap"
+                                       Margin="0,0,0,3" />
+                            <TextBlock x:Name="ProductionBatchText"
+                                       Grid.Row="2"
+                                       Text="批次: -"
+                                       FontSize="18"
+                                       TextWrapping="Wrap"
+                                       Margin="0,0,0,3" />
+                            <TextBlock x:Name="ProductionCountText"
+                                       Grid.Row="3"
+                                       Text="计件: 总0  OK0  NG0"
+                                       FontSize="22"
+                                       FontWeight="Bold"
+                                       TextWrapping="Wrap" />
+                        </Grid>
+                        <TextBlock Grid.Row="2"
+                                   Text="耗时 / XYR"
+                                   FontSize="18"
+                                   FontWeight="Bold"
+                                   Foreground="#005A9E"
+                                   Margin="8,0,8,4" />
                         <ListBox x:Name="LogList"
-                                 Grid.Row="1"
+                                 Grid.Row="2"
                                  FontFamily="SimSun"
-                                 FontSize="15"
+                                 FontSize="18"
                                  Background="White"
                                  Foreground="Black"
                                  BorderBrush="#A0A0A0"
+                                 Margin="8,28,8,8"
                                  ScrollViewer.VerticalScrollBarVisibility="Auto"
                                  ScrollViewer.HorizontalScrollBarVisibility="Disabled">
                             <ListBox.ItemContainerStyle>

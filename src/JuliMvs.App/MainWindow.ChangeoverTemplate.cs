@@ -115,6 +115,7 @@ public partial class MainWindow
             _currentBatchNo = batchNo;
             _batchSession = BatchSession.Empty();
             _batchSession.Start(batchNo, productName);
+            ResetProductionCounters();
             ClearCurrentInspection();
             await LoadRecipeAsync(productName, showMessageWhenMissing: false);
 

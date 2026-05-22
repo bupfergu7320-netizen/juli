@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Diagnostics;
 using System.IO;
 using System.Runtime.InteropServices;
 using System.Text.Json;
@@ -28,6 +29,8 @@ public partial class MainWindow
     private async Task HandlePlcCaptureRequestAsync()
     {
         Log("收到PLC定位触发D1000=1");
+        var requestStopwatch = Stopwatch.StartNew();
+        var captureElapsedMilliseconds = 0L;
 
         try
         {
@@ -44,15 +47,25 @@ public partial class MainWindow
             }
 
             Log("开始相机拍照检测");
+            var captureStopwatch = Stopwatch.StartNew();
             var rawImagePath = await CaptureCameraImageAsync(saveImage: false);
+            captureStopwatch.Stop();
+            captureElapsedMilliseconds = captureStopwatch.ElapsedMilliseconds;
             await InspectAndPersistAsync(
                 _lastCameraImage!,
                 rawImagePath,
                 "PLC触发检测",
-                writeToPlc: true);
+                writeToPlc: true,
+                captureElapsedMilliseconds,
+                requestStopwatch);
         }
         catch (Exception ex)
         {
+            requestStopwatch.Stop();
+            AddRuntimeLogLines(
+                $"结果: Error  原因: {ex.Message}",
+                $"耗时: 总{requestStopwatch.ElapsedMilliseconds}ms  拍照{captureElapsedMilliseconds}ms",
+                "XYR: 无有效测量值");
             await WritePlcErrorResultAsync($"PLC触发检测异常: {ex.Message}", NgReason.AlgorithmError);
         }
         finally
@@ -146,6 +159,54 @@ public partial class MainWindow
     private void UpdateBatchUi()
     {
         UpdateRunStopUi();
+        UpdateProductionSummaryUi();
+    }
+
+    private void ResetProductionCounters()
+    {
+        _productionTotalCount = 0;
+        _productionOkCount = 0;
+        _productionNgCount = 0;
+        UpdateProductionSummaryUi();
+    }
+
+    private void CountProductionResult(InspectionResult result)
+    {
+        if (result.Decision is not (InspectionDecision.Ok or InspectionDecision.Ng or InspectionDecision.Error))
+        {
+            return;
+        }
+
+        _productionTotalCount++;
+        if (result.Decision == InspectionDecision.Ok)
+        {
+            _productionOkCount++;
+        }
+        else
+        {
+            _productionNgCount++;
+        }
+
+        UpdateProductionSummaryUi();
+    }
+
+    private void UpdateProductionSummaryUi()
+    {
+        var productName = !string.IsNullOrWhiteSpace(_batchSession.ProductName)
+            ? _batchSession.ProductName
+            : _currentProductName;
+        var batchNo = !string.IsNullOrWhiteSpace(_batchSession.BatchNo)
+            ? _batchSession.BatchNo
+            : _currentBatchNo;
+
+        ProductionSummaryText.Text = $"型号: {FormatSummaryValue(productName)}";
+        ProductionBatchText.Text = $"批次: {FormatSummaryValue(batchNo)}";
+        ProductionCountText.Text = $"计件: 总{_productionTotalCount}  OK{_productionOkCount}  NG{_productionNgCount}";
+    }
+
+    private static string FormatSummaryValue(string? value)
+    {
+        return string.IsNullOrWhiteSpace(value) ? "-" : value.Trim();
     }
 
     private static void SetImage(System.Windows.Controls.Image target, string path)
@@ -163,13 +224,17 @@ public partial class MainWindow
         Mat image,
         string? rawImagePath,
         string logPrefix,
-        bool writeToPlc = false)
+        bool writeToPlc = false,
+        long captureElapsedMilliseconds = 0,
+        Stopwatch? totalStopwatch = null)
     {
         if (_template is null)
         {
             throw new InvalidOperationException("请先建立当前型号标准位/模板。");
         }
 
+        totalStopwatch ??= Stopwatch.StartNew();
+        var inspectionStopwatch = Stopwatch.StartNew();
         var activeParameters = ReadVisionParameters();
         var run = await _inspectionRunCoordinator.RunAsync(new InspectionRunRequest(
             image,
@@ -182,6 +247,7 @@ public partial class MainWindow
             _plcIpAddress,
             _plcPort,
             GetEffectivePlcOutputTransform()));
+        inspectionStopwatch.Stop();
 
         var result = run.Result;
         var output = run.Output;
@@ -193,6 +259,7 @@ public partial class MainWindow
         _lastInspectionResult = result;
         _lastRawImagePath = rawImagePath;
 
+        var renderStopwatch = Stopwatch.StartNew();
         if (run.ResultImagePath is not null)
         {
             SetImage(ResultImage, run.ResultImagePath);
@@ -203,6 +270,7 @@ public partial class MainWindow
         }
 
         RenderResult(result);
+        renderStopwatch.Stop();
         if (result.Decision is InspectionDecision.Ok or InspectionDecision.Ng)
         {
         }
@@ -219,10 +287,12 @@ public partial class MainWindow
         Log(_inspectionDiagnosticMessageFormatter.BuildCandidateDiagnosticsText(output.CandidateDiagnostics));
         Log(_inspectionDiagnosticMessageFormatter.BuildAngleCandidatesText(output.AngleDiagnostic));
         LogPlcOutputPreview(result, output.AlignmentSnapshot);
+        var plcStopwatch = Stopwatch.StartNew();
         if (writeToPlc)
         {
             await WritePlcResultIfConnectedAsync(result);
         }
+        plcStopwatch.Stop();
 
         if (result.Decision == InspectionDecision.Ok && result.Measurement is { } measurement)
         {
@@ -231,6 +301,20 @@ public partial class MainWindow
                 _plcOutputTransform,
                 writeToPlc);
         }
+
+        totalStopwatch.Stop();
+        if (writeToPlc)
+        {
+            CountProductionResult(result);
+        }
+
+        AddInspectionRuntimeSummary(
+            result,
+            captureElapsedMilliseconds,
+            inspectionStopwatch.ElapsedMilliseconds,
+            renderStopwatch.ElapsedMilliseconds,
+            plcStopwatch.ElapsedMilliseconds,
+            totalStopwatch.ElapsedMilliseconds);
     }
 
     private async Task WritePlcResultIfConnectedAsync(InspectionResult result)
@@ -304,6 +388,71 @@ public partial class MainWindow
         }
     }
 
+    private void AddInspectionRuntimeSummary(
+        InspectionResult result,
+        long captureElapsedMilliseconds,
+        long inspectionElapsedMilliseconds,
+        long renderElapsedMilliseconds,
+        long plcElapsedMilliseconds,
+        long totalElapsedMilliseconds)
+    {
+        AddRuntimeLogLines(
+            $"结果: {result.Decision}  原因: {FormatNgReason(result)}",
+            $"耗时: 总{totalElapsedMilliseconds}ms  拍照{captureElapsedMilliseconds}ms  检测/存储{inspectionElapsedMilliseconds}ms  显示{renderElapsedMilliseconds}ms  PLC{plcElapsedMilliseconds}ms",
+            FormatRuntimeXyrLine(result));
+    }
+
+    private static string FormatNgReason(InspectionResult result)
+    {
+        if (result.Decision == InspectionDecision.Ok)
+        {
+            return "OK";
+        }
+
+        return result.NgReason.ToString();
+    }
+
+    private static string FormatRuntimeXyrLine(InspectionResult result)
+    {
+        var measurement = result.Measurement;
+        if (measurement is null)
+        {
+            return "XYR: 无有效测量值";
+        }
+
+        return
+            "XYR: " +
+            $"偏差 X={FormatRuntimeNumber(measurement.XOffsetMm)}mm " +
+            $"Y={FormatRuntimeNumber(measurement.YOffsetMm)}mm " +
+            $"R={FormatRuntimeNumber(measurement.AngleOffsetDegrees)}deg  " +
+            $"补偿 X={FormatRuntimeNumber(measurement.XCompensationMm)}mm " +
+            $"Y={FormatRuntimeNumber(measurement.YCompensationMm)}mm " +
+            $"R={FormatRuntimeNumber(measurement.RotationCompensationDegrees)}deg";
+    }
+
+    private static string FormatRuntimeNumber(double value)
+    {
+        var rounded = Math.Round(value, 2, MidpointRounding.AwayFromZero);
+        return Math.Abs(rounded) < 0.005
+            ? "0"
+            : rounded.ToString("0.00", CultureInfo.InvariantCulture);
+    }
+
+    private void AddRuntimeLogLines(params string[] lines)
+    {
+        for (var index = lines.Length - 1; index >= 0; index--)
+        {
+            var line = lines[index];
+            _fileLogger.Write(line);
+            LogList.Items.Insert(0, $"{DateTime.Now:HH:mm:ss} {line}");
+        }
+
+        while (LogList.Items.Count > 80)
+        {
+            LogList.Items.RemoveAt(LogList.Items.Count - 1);
+        }
+    }
+
     private PlcOutputCommand CalculatePlcOutputCommand(InspectionMeasurement measurement)
     {
         return PlcOutputDiagnosticFormatter.CalculatePlcOutputCommand(measurement, GetEffectivePlcOutputTransform());
@@ -312,10 +461,5 @@ public partial class MainWindow
     private void Log(string message)
     {
         _fileLogger.Write(message);
-        LogList.Items.Insert(0, $"{DateTime.Now:HH:mm:ss} {message}");
-        while (LogList.Items.Count > 200)
-        {
-            LogList.Items.RemoveAt(LogList.Items.Count - 1);
-        }
     }
 }

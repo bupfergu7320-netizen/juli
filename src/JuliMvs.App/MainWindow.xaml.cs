@@ -115,6 +115,9 @@ public partial class MainWindow : System.Windows.Window
     private CancellationTokenSource? _plcPollingCts;
     private bool _productionEnabled;
     private bool _changeoverTemplateRequested;
+    private int _productionTotalCount;
+    private int _productionOkCount;
+    private int _productionNgCount;
     private System.Windows.Window? _changeoverDialog;
     private TextBox? _changeoverModelBox;
     private TextBlock? _changeoverStatusText;
