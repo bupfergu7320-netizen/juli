@@ -1,6 +1,8 @@
 using JuliMvs.App.Services;
 using JuliMvs.Core.Camera;
 using JuliMvs.Core.Inspection;
+using JuliMvs.Core.Vision;
+using JuliMvs.Plc;
 using System.Text.Json;
 
 VerifyOldPublishedDataPathResolvesUnderCurrentBaseDirectory();
@@ -11,8 +13,9 @@ VerifyLegacyLocalSettingsDefaultsCurrentProductName();
 VerifyProductionOkDoesNotSaveImages();
 VerifyProductionNgSavesOnlyDiagnosticImage();
 VerifyManualInspectionKeepsExistingImageBehavior();
+VerifyClearCalibrationDisablesAllCalibrationButKeepsProductionSettings();
 
-Console.WriteLine("App services keep template images portable, local settings backward-compatible, and production image saving limited.");
+Console.WriteLine("App services keep template images portable, local settings backward-compatible, production image saving limited, and calibration clearing safe.");
 
 static void VerifyOldPublishedDataPathResolvesUnderCurrentBaseDirectory()
 {
@@ -139,6 +142,68 @@ static void VerifyManualInspectionKeepsExistingImageBehavior()
     AssertEqual(null, decision.ProductionLogMessage, "manual log");
 }
 
+static void VerifyClearCalibrationDisablesAllCalibrationButKeepsProductionSettings()
+{
+    var settings = new MachineSettings
+    {
+        LensDistortionCalibration = new LensDistortionCalibration
+        {
+            Enabled = true,
+            CalibrationId = "distortion-1",
+            ImageWidth = 2448,
+            ImageHeight = 2048,
+            CameraMatrix = [1, 0, 0, 0, 1, 0, 0, 0, 1],
+            DistortionCoefficients = [0.1, 0.2],
+            RmsReprojectionErrorPixels = 0.2,
+            CapturedImageCount = 12,
+            CreatedAt = DateTimeOffset.Now
+        },
+        CameraCalibration = new CameraCalibration
+        {
+            Enabled = true,
+            CalibrationId = "camera-1",
+            SourceDistortionCalibrationId = "distortion-1",
+            RmsErrorMm = 0.03,
+            Points =
+            [
+                new CalibrationPoint(100, 200, 0, 0),
+                new CalibrationPoint(200, 200, 30, 0)
+            ]
+        },
+        RAxisCenterCalibration = new RAxisCenterCalibration
+        {
+            Enabled = true,
+            CalibrationId = "r-axis-1",
+            SourceCameraCalibrationId = "camera-1",
+            CenterXMm = 12.3,
+            CenterYMm = 45.6,
+            RmsErrorMm = 0.02,
+            CaptureTarget = "target"
+        },
+        InvertXCompensation = true,
+        InvertYCompensation = true,
+        InvertRotationCompensation = true,
+        BackSideNgEnabled = true,
+        BackSideNgMinimumBackScore = 0.7,
+        BackSideNgMaximumScoreDifference = -0.2,
+        PlcOutputTransform = new PlcOutputTransform(Xx: -1.0, Yy: 1.2, RScale: 1.0)
+    };
+
+    var cleared = settings.ClearCalibration();
+
+    AssertBoolEqual(false, cleared.LensDistortionCalibration?.Enabled == true, "cleared lens distortion");
+    AssertBoolEqual(false, cleared.CameraCalibration.Enabled, "cleared camera calibration");
+    AssertBoolEqual(false, cleared.RAxisCenterCalibration?.Enabled == true, "cleared R-axis center calibration");
+    AssertBoolEqual(true, cleared.InvertXCompensation, "kept invert X");
+    AssertBoolEqual(true, cleared.InvertYCompensation, "kept invert Y");
+    AssertBoolEqual(true, cleared.InvertRotationCompensation, "kept invert R");
+    AssertBoolEqual(true, cleared.BackSideNgEnabled, "kept backside NG");
+    AssertDoubleEqual(0.7, cleared.BackSideNgMinimumBackScore, "kept backside min score");
+    AssertDoubleEqual(-0.2, cleared.BackSideNgMaximumScoreDifference, "kept backside score diff");
+    AssertDoubleEqual(-1.0, cleared.PlcOutputTransform?.Xx ?? 0, "kept PLC Xx");
+    AssertDoubleEqual(1.2, cleared.PlcOutputTransform?.Yy ?? 0, "kept PLC Yy");
+}
+
 static string CreateTempDirectory()
 {
     var path = Path.Combine(Path.GetTempPath(), "JuliMvs.App.Tests", Guid.NewGuid().ToString("N"));
@@ -157,6 +222,14 @@ static void AssertEqual(string? expected, string? actual, string name)
 static void AssertBoolEqual(bool expected, bool actual, string name)
 {
     if (expected != actual)
+    {
+        throw new InvalidOperationException($"{name}: expected '{expected}', actual '{actual}'");
+    }
+}
+
+static void AssertDoubleEqual(double expected, double actual, string name)
+{
+    if (Math.Abs(expected - actual) > 0.000001)
     {
         throw new InvalidOperationException($"{name}: expected '{expected}', actual '{actual}'");
     }

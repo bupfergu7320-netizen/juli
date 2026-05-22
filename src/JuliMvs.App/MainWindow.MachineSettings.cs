@@ -151,6 +151,18 @@ public partial class MainWindow
         }
     }
 
+    private void ClearMachineCalibration()
+    {
+        var settings = BuildCurrentMachineSettings().ClearCalibration();
+        ApplyMachineSettings(settings);
+        ClearCurrentInspection();
+        _productionEnabled = false;
+        UpdateRunStopUi();
+        _machineSettingsStore.Save(settings);
+        MessageText.Text = "\u6807\u5b9a\u5df2\u6e05\u9664\uff1a\u8054\u5408\u6807\u5b9a\u3001\u955c\u5934\u7578\u53d8\u30019\u70b9XY\u548cR\u8f74\u4e2d\u5fc3\u90fd\u5df2\u5931\u6548\uff0c\u8bf7\u91cd\u65b0\u6807\u5b9a\u540e\u518d\u8fdb\u5165\u751f\u4ea7\u3002";
+        Log(MessageText.Text);
+    }
+
     private void ApplyMachineSettings(MachineSettings settings)
     {
         _lensDistortionCalibration = settings.LensDistortionCalibration ?? LensDistortionCalibration.Disabled;

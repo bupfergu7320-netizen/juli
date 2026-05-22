@@ -142,6 +142,27 @@ public partial class MainWindow
         Grid.SetColumn(importButton, 1);
         settingsButtons.Children.Add(importButton);
 
+        var clearButton = CreateDialogButton("\u6e05\u9664\u6807\u5b9a", (_, _) =>
+        {
+            var confirm = MessageBox.Show(
+                "\u786e\u5b9a\u8981\u6e05\u9664\u6240\u6709\u673a\u5668\u6807\u5b9a\u5417\uff1f\n\n\u5c06\u6e05\u9664\uff1a\u8054\u5408\u6807\u5b9a\u7ed3\u679c\u3001\u955c\u5934\u7578\u53d8\u30019\u70b9XY\u3001R\u8f74\u4e2d\u5fc3\u3002\n\u6e05\u9664\u540e\u4e0d\u80fd\u7ee7\u7eed\u751f\u4ea7\uff0c\u5fc5\u987b\u91cd\u65b0\u6807\u5b9a\u5e76\u91cd\u65b0\u5efa\u7acb\u5f53\u524d\u578b\u53f7\u6807\u51c6\u4f4d/\u6a21\u677f\u3002",
+                "\u6e05\u9664\u6807\u5b9a",
+                MessageBoxButton.YesNo,
+                MessageBoxImage.Warning);
+            if (confirm != MessageBoxResult.Yes)
+            {
+                return;
+            }
+
+            ClearMachineCalibration();
+            RefreshMachineCalibrationStatus(statusText);
+        }, 0);
+        clearButton.Width = double.NaN;
+        clearButton.Margin = new Thickness(8, 0, 8, 0);
+        clearButton.Foreground = Brushes.DarkRed;
+        Grid.SetColumn(clearButton, 2);
+        settingsButtons.Children.Add(clearButton);
+
         dialog.Content = root;
         dialog.ShowDialog();
     }

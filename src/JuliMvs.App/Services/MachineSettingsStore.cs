@@ -104,4 +104,14 @@ internal sealed record MachineSettings
     public PlcOutputTransform? PlcOutputTransform { get; init; } = JuliMvs.Plc.PlcOutputTransform.Identity;
 
     public static MachineSettings Default { get; } = new();
+
+    public MachineSettings ClearCalibration()
+    {
+        return this with
+        {
+            LensDistortionCalibration = JuliMvs.Core.Vision.LensDistortionCalibration.Disabled,
+            CameraCalibration = CameraCalibration.Disabled,
+            RAxisCenterCalibration = JuliMvs.Core.Vision.RAxisCenterCalibration.Disabled
+        };
+    }
 }
