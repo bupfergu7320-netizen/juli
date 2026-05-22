@@ -36,21 +36,9 @@ internal sealed class InspectionRunCoordinator
             rawImagePath: request.RawImagePath);
 
         var logs = new List<string>();
-        var shouldSaveProductionImages = request.WriteToPlc;
-        var resultRawImagePath = request.RawImagePath;
-        if (shouldSaveProductionImages)
-        {
-            resultRawImagePath = _fileStore.SaveInspectionRawImage(
-                request.Image,
-                request.Template.BatchNo,
-                output.Result.PartNo);
-            logs.Add(output.Result.Decision == InspectionDecision.Ok
-                ? $"Production OK raw image saved for replay: {resultRawImagePath}"
-                : $"Production non-OK raw image saved for diagnostics: {resultRawImagePath}");
-        }
-
-        var saveImages = !request.WriteToPlc || shouldSaveProductionImages;
-        var resultImagePath = saveImages
+        var imageSaveDecision = InspectionImageSavePolicy.Decide(request.WriteToPlc, output.Result.Decision);
+        var resultRawImagePath = imageSaveDecision.KeepIncomingRawImagePath ? request.RawImagePath : null;
+        var resultImagePath = imageSaveDecision.SaveDiagnosticImage
             ? _fileStore.SaveDiagnosticImage(output.DiagnosticImage, request.Template.BatchNo, output.Result.PartNo)
             : null;
         var result = output.Result with
@@ -60,11 +48,14 @@ internal sealed class InspectionRunCoordinator
         };
         await _repository.SaveResultAsync(result);
 
-        if (resultImagePath is not null && shouldSaveProductionImages)
+        if (imageSaveDecision.ProductionLogMessage is not null)
         {
-            logs.Add(result.Decision == InspectionDecision.Ok
-                ? $"Production OK result image saved for replay: {resultImagePath}"
-                : $"Production non-OK result image saved for diagnostics: {resultImagePath}");
+            logs.Add(imageSaveDecision.ProductionLogMessage);
+        }
+
+        if (resultImagePath is not null && request.WriteToPlc)
+        {
+            logs.Add($"\u751f\u4ea7NG\u8bca\u65ad\u56fe\u5df2\u4fdd\u5b58: {resultImagePath}");
         }
 
         string? reportPath = null;

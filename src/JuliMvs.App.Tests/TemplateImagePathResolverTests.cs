@@ -1,5 +1,6 @@
 using JuliMvs.App.Services;
 using JuliMvs.Core.Camera;
+using JuliMvs.Core.Inspection;
 using System.Text.Json;
 
 VerifyOldPublishedDataPathResolvesUnderCurrentBaseDirectory();
@@ -7,8 +8,11 @@ VerifyExistingPathIsPreserved();
 VerifyUnmatchedMissingPathIsPreserved();
 VerifyLocalSettingsKeepsCurrentProductName();
 VerifyLegacyLocalSettingsDefaultsCurrentProductName();
+VerifyProductionOkDoesNotSaveImages();
+VerifyProductionNgSavesOnlyDiagnosticImage();
+VerifyManualInspectionKeepsExistingImageBehavior();
 
-Console.WriteLine("App services keep template images portable and local settings backward-compatible.");
+Console.WriteLine("App services keep template images portable, local settings backward-compatible, and production image saving limited.");
 
 static void VerifyOldPublishedDataPathResolvesUnderCurrentBaseDirectory()
 {
@@ -105,6 +109,36 @@ static void VerifyLegacyLocalSettingsDefaultsCurrentProductName()
     AssertEqual(null, loaded.CurrentProductName, "legacy current product name");
 }
 
+static void VerifyProductionOkDoesNotSaveImages()
+{
+    var decision = InspectionImageSavePolicy.Decide(writeToPlc: true, InspectionDecision.Ok);
+
+    AssertBoolEqual(false, decision.KeepIncomingRawImagePath, "production OK raw image path");
+    AssertBoolEqual(false, decision.SaveDiagnosticImage, "production OK diagnostic image");
+    AssertEqual(
+        "\u751f\u4ea7OK\u4e0d\u4fdd\u5b58\u56fe\u7247\uff0c\u53ea\u4fdd\u5b58\u68c0\u6d4b\u8bb0\u5f55\u3002",
+        decision.ProductionLogMessage,
+        "production OK log");
+}
+
+static void VerifyProductionNgSavesOnlyDiagnosticImage()
+{
+    var decision = InspectionImageSavePolicy.Decide(writeToPlc: true, InspectionDecision.Ng);
+
+    AssertBoolEqual(false, decision.KeepIncomingRawImagePath, "production NG raw image path");
+    AssertBoolEqual(true, decision.SaveDiagnosticImage, "production NG diagnostic image");
+    AssertEqual(null, decision.ProductionLogMessage, "production NG log");
+}
+
+static void VerifyManualInspectionKeepsExistingImageBehavior()
+{
+    var decision = InspectionImageSavePolicy.Decide(writeToPlc: false, InspectionDecision.Ok);
+
+    AssertBoolEqual(true, decision.KeepIncomingRawImagePath, "manual raw image path");
+    AssertBoolEqual(true, decision.SaveDiagnosticImage, "manual diagnostic image");
+    AssertEqual(null, decision.ProductionLogMessage, "manual log");
+}
+
 static string CreateTempDirectory()
 {
     var path = Path.Combine(Path.GetTempPath(), "JuliMvs.App.Tests", Guid.NewGuid().ToString("N"));
@@ -115,6 +149,14 @@ static string CreateTempDirectory()
 static void AssertEqual(string? expected, string? actual, string name)
 {
     if (!string.Equals(expected, actual, StringComparison.OrdinalIgnoreCase))
+    {
+        throw new InvalidOperationException($"{name}: expected '{expected}', actual '{actual}'");
+    }
+}
+
+static void AssertBoolEqual(bool expected, bool actual, string name)
+{
+    if (expected != actual)
     {
         throw new InvalidOperationException($"{name}: expected '{expected}', actual '{actual}'");
     }
