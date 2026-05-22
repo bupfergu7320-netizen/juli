@@ -112,8 +112,18 @@ public partial class MainWindow
                 }
                 else
                 {
-                    SetImage(previewImage, test.RawImagePath);
-                    SetImage(ResultImage, test.RawImagePath);
+                    if (test.RawImagePath is not null)
+                    {
+                        SetImage(previewImage, test.RawImagePath);
+                        SetImage(ResultImage, test.RawImagePath);
+                    }
+                    else if (_lastCameraImage is not null)
+                    {
+                        var preview = CreateBitmapImageFromMat(_lastCameraImage);
+                        previewImage.Source = preview;
+                        ResultImage.Source = preview;
+                    }
+
                     detailsBox.Text = BuildPhotoOnlyTestDetails(test);
                     MessageText.Text = "\u62cd\u7167\u6d4b\u8bd5\u5df2\u5b8c\u6210\uff1a\u4ec5\u62cd\u7167\u9884\u89c8\uff0c\u4e0d\u505a\u68c0\u6d4b\u548cPLC\u9884\u89c8\u3002";
                     Log($"{MessageText.Text} {test.SkipReason}");
@@ -137,7 +147,7 @@ public partial class MainWindow
     }
 
     private sealed record PhotoTestCaptureResult(
-        string RawImagePath,
+        string? RawImagePath,
         string? SkipReason,
         InspectionRunResult? Run);
 
@@ -148,13 +158,6 @@ public partial class MainWindow
             throw new InvalidOperationException("相机未连接，无法拍照测试。");
         }
 
-        var rawImagePath = await CaptureCameraImageAsync(saveImage: true);
-        if (string.IsNullOrWhiteSpace(rawImagePath))
-        {
-            throw new InvalidOperationException("拍照测试保存图片失败，未生成原图路径。");
-        }
-
-        _lastRawImagePath = rawImagePath;
         var skipReasons = new List<string>();
         if (_template is null)
         {
@@ -166,6 +169,16 @@ public partial class MainWindow
             skipReasons.Add($"机器标定未完成: {calibrationMessage}");
         }
 
+        var shouldSaveImage = skipReasons.Count == 0;
+        var rawImagePath = await CaptureCameraImageAsync(
+            saveImage: shouldSaveImage,
+            applyCaptureDelay: shouldSaveImage);
+        if (shouldSaveImage && string.IsNullOrWhiteSpace(rawImagePath))
+        {
+            throw new InvalidOperationException("拍照测试保存图片失败，未生成原图路径。");
+        }
+
+        _lastRawImagePath = rawImagePath;
         if (skipReasons.Count > 0)
         {
             return new PhotoTestCaptureResult(
@@ -248,7 +261,7 @@ public partial class MainWindow
             "==============================",
             "模式: 仅拍照预览",
             $"原因: {test.SkipReason}",
-            $"原图: {FormatPathForDisplay(test.RawImagePath)}",
+            $"原图: {FormatPhotoOnlyRawImagePath(test.RawImagePath)}",
             string.Empty,
             "当前状态",
             "------------------------------",
@@ -259,10 +272,17 @@ public partial class MainWindow
             string.Empty,
             "说明",
             "------------------------------",
-            "本次只保存并显示相机原图，不做工件检测，不生成PLC预览，也不写PLC。",
+            "本次只在内存显示相机画面，不保存原图，不做工件检测，不生成PLC预览，也不写PLC。",
             "模板和机器标定都准备好后，再点拍照测试会自动恢复完整检测预览。"
         };
         return string.Join(Environment.NewLine, text);
+    }
+
+    private static string FormatPhotoOnlyRawImagePath(string? rawImagePath)
+    {
+        return string.IsNullOrWhiteSpace(rawImagePath)
+            ? "未保存（快速预览模式）"
+            : FormatPathForDisplay(rawImagePath);
     }
 
     private string BuildPhotoTestDetails(InspectionRunResult run)

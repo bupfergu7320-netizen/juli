@@ -27,7 +27,8 @@ public partial class MainWindow
 {
     private async Task<string?> CaptureCameraImageAsync(
         bool saveImage,
-        CalibrationImageSaveTarget? saveTarget = null)
+        CalibrationImageSaveTarget? saveTarget = null,
+        bool applyCaptureDelay = true)
     {
         if (!_cameraConnected)
         {
@@ -41,7 +42,7 @@ public partial class MainWindow
 
         try
         {
-            if (_cameraSettings.CaptureDelaySeconds > 0)
+            if (applyCaptureDelay && _cameraSettings.CaptureDelaySeconds > 0)
             {
                 await Task.Delay(TimeSpan.FromSeconds(_cameraSettings.CaptureDelaySeconds));
             }
@@ -78,7 +79,7 @@ public partial class MainWindow
 
             Log(saveImage
                 ? $"相机拍照完成: {capture.Frame.Width}x{capture.Frame.Height}, {capture.Frame.PixelFormat}, {capture.ImagePath}"
-                : $"相机拍照完成: {capture.Frame.Width}x{capture.Frame.Height}, {capture.Frame.PixelFormat}, 生产模式不保存图片");
+                : $"相机拍照完成: {capture.Frame.Width}x{capture.Frame.Height}, {capture.Frame.PixelFormat}, 未保存图片");
             if (capture.MetadataPath is not null)
             {
                 Log($"相机元数据已保存: {capture.MetadataPath}");
