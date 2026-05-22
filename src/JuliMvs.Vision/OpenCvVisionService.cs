@@ -122,6 +122,20 @@ public sealed class OpenCvVisionService
         double QualityScore,
         IReadOnlyList<(double AngleDegrees, double Score)> Candidates);
 
+    private sealed record UndistortMap(
+        string CalibrationId,
+        int ImageWidth,
+        int ImageHeight,
+        Mat MapX,
+        Mat MapY) : IDisposable
+    {
+        public void Dispose()
+        {
+            MapX.Dispose();
+            MapY.Dispose();
+        }
+    }
+
     private sealed record AutoFeatureAngleCluster(
         double AngleOffsetDegrees,
         double ResolvedAngleDegrees,
@@ -132,10 +146,12 @@ public sealed class OpenCvVisionService
         int BestFeatureIndex);
 
     private readonly object _templateAngleModelSync = new();
+    private readonly object _undistortMapSync = new();
     private TemplateAngleModel? _cachedTemplateAngleModel;
     private AutoFeatureAngleModel? _cachedAutoFeatureAngleModel;
     private PolarRingAngleModel? _cachedPolarRingAngleModel;
     private ContourPolarAngleModel? _cachedContourPolarAngleModel;
+    private UndistortMap? _cachedUndistortMap;
     private readonly PoseInvariantTemplateMatcher _templateMatcher = new();
 
     public PartTemplate CreateTemplate(
@@ -416,7 +432,39 @@ public sealed class OpenCvVisionService
         return selected?.Detection;
     }
 
-    private static Mat Undistort(Mat image, LensDistortionCalibration calibration)
+    private Mat Undistort(Mat image, LensDistortionCalibration calibration)
+    {
+        var map = GetUndistortMap(calibration, image.Width, image.Height);
+        var corrected = new Mat();
+        Cv2.Remap(image, corrected, map.MapX, map.MapY, InterpolationFlags.Linear);
+        return corrected;
+    }
+
+    private UndistortMap GetUndistortMap(
+        LensDistortionCalibration calibration,
+        int imageWidth,
+        int imageHeight)
+    {
+        lock (_undistortMapSync)
+        {
+            if (_cachedUndistortMap is { } cached &&
+                cached.ImageWidth == imageWidth &&
+                cached.ImageHeight == imageHeight &&
+                string.Equals(cached.CalibrationId, calibration.CalibrationId, StringComparison.Ordinal))
+            {
+                return cached;
+            }
+
+            _cachedUndistortMap?.Dispose();
+            _cachedUndistortMap = BuildUndistortMap(calibration, imageWidth, imageHeight);
+            return _cachedUndistortMap;
+        }
+    }
+
+    private static UndistortMap BuildUndistortMap(
+        LensDistortionCalibration calibration,
+        int imageWidth,
+        int imageHeight)
     {
         using var cameraMatrix = Mat.FromArray(new[,]
         {
@@ -425,9 +473,18 @@ public sealed class OpenCvVisionService
             { calibration.CameraMatrix[6], calibration.CameraMatrix[7], calibration.CameraMatrix[8] }
         });
         using var distortion = Mat.FromArray(calibration.DistortionCoefficients);
-        var corrected = new Mat();
-        Cv2.Undistort(image, corrected, cameraMatrix, distortion);
-        return corrected;
+        var mapX = new Mat();
+        var mapY = new Mat();
+        Cv2.InitUndistortRectifyMap(
+            cameraMatrix,
+            distortion,
+            new Mat(),
+            cameraMatrix,
+            new Size(imageWidth, imageHeight),
+            MatType.CV_32FC1,
+            mapX,
+            mapY);
+        return new UndistortMap(calibration.CalibrationId, imageWidth, imageHeight, mapX, mapY);
     }
 
     private static InspectionDecision DecideSingleShot(
