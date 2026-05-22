@@ -31,8 +31,6 @@ public partial class MainWindow
 
             if (templateLoaded)
             {
-                _productionEnabled = true;
-                UpdateRunStopUi();
                 SaveLocalSettings();
                 var templateBaselineSummary = _template is null
                     ? string.Empty
@@ -40,14 +38,13 @@ public partial class MainWindow
                 _changeoverStartButton?.SetCurrentValue(IsEnabledProperty, true);
                 _changeoverCaptureTemplateButton?.SetCurrentValue(IsEnabledProperty, false);
                 _changeoverCancelButton?.SetCurrentValue(IsEnabledProperty, false);
-                MessageText.Text = $"已加载型号 {productName} 的当前标准位/模板，等待PLC触发拍照检测。";
+                MessageText.Text = $"已加载型号 {productName} 的当前标准位/模板。点击运行后等待PLC触发拍照检测。";
                 Log(MessageText.Text);
-                Log($"最简生产模式已就绪: 型号 {productName}, 批次 {batchNo}, 等待PLC触发D1000=1。");
                 UpdateChangeoverFlow(
                     activeStep: 4,
                     completedSteps: 5,
                     status: "已加载标准位/模板",
-                    hint: "当前型号标准位/模板与当前标定匹配，已自动进入运行，等待PLC触发生产检测。",
+                    hint: "当前型号标准位/模板与当前标定匹配。关闭窗口后点击运行，等待PLC触发生产检测。",
                     summary:
                         $"型号: {productName}\n" +
                         $"批次: {batchNo}\n" +
@@ -272,8 +269,6 @@ public partial class MainWindow
         }
 
         _changeoverTemplateRequested = false;
-        _productionEnabled = true;
-        UpdateRunStopUi();
         SaveLocalSettings();
         _changeoverStartButton?.SetCurrentValue(IsEnabledProperty, true);
         _changeoverCaptureTemplateButton?.SetCurrentValue(IsEnabledProperty, false);
@@ -281,9 +276,8 @@ public partial class MainWindow
 
         SetImage(ResultImage, selfCheckEvidence.DiagnosticImagePath);
         RenderTemplateSummary(_template);
-        MessageText.Text = "当前型号标准位/模板已重新建立并保存，当前型号进入生产检测状态。";
+        MessageText.Text = "当前型号标准位/模板已重新建立并保存。点击运行后进入生产检测状态。";
         Log($"换型标准位/模板建立完成: 型号 {_template.ProductName}, 批次 {_template.BatchNo}, 图像 {rawImagePath}, 自检报告 {selfCheckEvidence.ReportPath}");
-        Log($"最简生产模式已就绪: 型号 {_template.ProductName}, 批次 {_template.BatchNo}, 等待PLC触发D1000=1。");
         UpdateChangeoverFlow(
             activeStep: 5,
             completedSteps: 6,
