@@ -80,6 +80,33 @@ public partial class MainWindow
                 messages.PlcErrorMessage ?? "\u0050\u004c\u0043\u89e6\u53d1\u68c0\u6d4b\u5931\u8d25\u3002",
                 validation.NgReason ?? NgReason.PlcError);
         }
+        else if (validation.Action == PlcCaptureRequestAction.Ignore)
+        {
+            await ClearPlcTriggerAfterIgnoredRequestAsync();
+        }
+    }
+
+    private async Task ClearPlcTriggerAfterIgnoredRequestAsync()
+    {
+        var client = _plcClient;
+        if (client is null || !client.IsConnected)
+        {
+            Log("PLC触发已忽略，但PLC未连接，无法清D1000=0。");
+            return;
+        }
+
+        try
+        {
+            await client.ClearTriggerAsync();
+            _plcTriggerGate.MarkTriggerCleared();
+            SetPlcStatus("PLC通讯正常", isNormal: true);
+            Log("PLC触发已忽略，上位机已清D1000=0。");
+        }
+        catch (Exception ex)
+        {
+            SetPlcStatus("PLC通讯异常", isNormal: false);
+            Log($"PLC触发已忽略，但上位机清D1000失败: {ex.Message}");
+        }
     }
 
     private async Task WritePlcErrorResultAsync(string message, NgReason reason)

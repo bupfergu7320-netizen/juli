@@ -88,7 +88,12 @@ public sealed class MitsubishiModbusTcpPlcClient : IPlcClient
             await WriteSingleRegisterAsync(_options.ResultAddress, 2, cancellationToken);
         }
 
-        // Standard handshake: PLC owns D1000 and clears it after consuming D1010.
+        // Standard handshake: PC writes the result first; caller clears D1000 after handoff.
+    }
+
+    public Task ClearTriggerAsync(CancellationToken cancellationToken = default)
+    {
+        return WriteSingleRegisterAsync(_options.TriggerAddress, 0, cancellationToken);
     }
 
     public async Task<PlcOutputReadback> ReadOutputReadbackAsync(CancellationToken cancellationToken = default)

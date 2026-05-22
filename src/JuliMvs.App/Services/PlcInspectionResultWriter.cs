@@ -6,9 +6,6 @@ namespace JuliMvs.App.Services;
 
 internal sealed class PlcInspectionResultWriter
 {
-    private const int SelfClearTimeoutMilliseconds = 3000;
-    private const int SelfClearPollMilliseconds = 250;
-
     public async Task<PlcInspectionResultWriteOutcome> WriteInspectionResultAsync(
         MitsubishiModbusTcpPlcClient? client,
         InspectionResult result,
@@ -46,65 +43,43 @@ internal sealed class PlcInspectionResultWriter
                 $"D1004={FormatPlcValueText(preRotationOutput.YDeviation)}, " +
                 $"D1006={FormatPlcValueText(preRotationOutput.RDeviation)}, " +
                 $"PLC deviation transform {outputTransformText}, " +
-                "D1010=1, waiting for PLC to clear D1000.");
+                "D1010=1.");
             var readbackAfterWrite = await LogPlcOutputReadbackAsync(client, log);
-            log("PLC result handed off: waiting for PLC to clear D1000; PC will not actively clear D1000.");
-            return BuildOutcome(
-                await WaitForPlcTriggerClearAsync(client, log),
-                readbackAfterWrite);
+            log("PLC result handed off: PC will clear D1000=0 after writing D1010.");
+            return await ClearTriggerAndBuildOutcomeAsync(client, readbackAfterWrite, log);
         }
 
-        log("PLC write completed: D1010=2, waiting for PLC to clear D1000.");
+        log("PLC write completed: D1010=2.");
         var ngReadbackAfterWrite = await LogPlcOutputReadbackAsync(client, log);
-        log("PLC result handed off: waiting for PLC to clear D1000; PC will not actively clear D1000.");
-        return BuildOutcome(
-            await WaitForPlcTriggerClearAsync(client, log),
-            ngReadbackAfterWrite);
+        log("PLC result handed off: PC will clear D1000=0 after writing D1010.");
+        return await ClearTriggerAndBuildOutcomeAsync(client, ngReadbackAfterWrite, log);
     }
 
-    private static PlcInspectionResultWriteOutcome BuildOutcome(
-        PlcTriggerClearWaitOutcome clearOutcome,
-        PlcOutputReadback? readbackAfterWrite)
-    {
-        return clearOutcome.Result switch
-        {
-            PlcTriggerClearResult.Cleared => PlcInspectionResultWriteOutcome.Cleared(readbackAfterWrite, clearOutcome.LastReadback),
-            PlcTriggerClearResult.Timeout => PlcInspectionResultWriteOutcome.WaitingForReset(readbackAfterWrite, clearOutcome.LastReadback),
-            _ => PlcInspectionResultWriteOutcome.WriteCompleted(readbackAfterWrite, clearOutcome.LastReadback)
-        };
-    }
-
-    private static async Task<PlcTriggerClearWaitOutcome> WaitForPlcTriggerClearAsync(
+    private static async Task<PlcInspectionResultWriteOutcome> ClearTriggerAndBuildOutcomeAsync(
         MitsubishiModbusTcpPlcClient client,
+        PlcOutputReadback? readbackAfterWrite,
         Action<string> log)
     {
-        log($"PLC self-clear wait: max {SelfClearTimeoutMilliseconds}ms; keeping D1000=1 for PLC result consumption.");
-
-        PlcOutputReadback? lastReadback = null;
-        var pollCount = Math.Max(1, SelfClearTimeoutMilliseconds / SelfClearPollMilliseconds);
-        for (var i = 0; i < pollCount; i++)
+        try
         {
-            await Task.Delay(SelfClearPollMilliseconds);
-            try
+            await client.ClearTriggerAsync();
+            log("PC cleared PLC trigger: D1000=0.");
+            var readbackAfterClear = await LogPlcOutputReadbackAsync(client, log);
+
+            if (readbackAfterClear?.Trigger == 0)
             {
-                lastReadback = await client.ReadOutputReadbackAsync();
-            }
-            catch (Exception ex)
-            {
-                log($"PLC self-clear readback failed: {ex.Message}");
-                return new PlcTriggerClearWaitOutcome(PlcTriggerClearResult.ReadbackFailed, lastReadback);
+                log("PLC trigger clear confirmed: D1000=0; standard handshake completed and next trigger is allowed.");
+                return PlcInspectionResultWriteOutcome.Cleared(readbackAfterWrite, readbackAfterClear);
             }
 
-            if (lastReadback.Trigger == 0)
-            {
-                log("PLC cleared D1000=0; standard handshake completed and next trigger is allowed.");
-                return new PlcTriggerClearWaitOutcome(PlcTriggerClearResult.Cleared, lastReadback);
-            }
+            log($"PLC trigger clear readback abnormal: D1000={readbackAfterClear?.Trigger.ToString(CultureInfo.InvariantCulture) ?? "unknown"}.");
+            return PlcInspectionResultWriteOutcome.WriteCompleted(readbackAfterWrite, readbackAfterClear);
         }
-
-        var trigger = lastReadback?.Trigger;
-        log($"PLC self-clear timed out: D1000={trigger?.ToString(CultureInfo.InvariantCulture) ?? "unknown"}; PC will not clear D1000 and is waiting for PLC/manual reset.");
-        return new PlcTriggerClearWaitOutcome(PlcTriggerClearResult.Timeout, lastReadback);
+        catch (Exception ex)
+        {
+            log($"PC clear D1000 failed: {ex.Message}");
+            throw;
+        }
     }
 
     private static async Task<PlcOutputReadback?> LogPlcOutputReadbackAsync(
@@ -194,15 +169,4 @@ internal sealed record PlcInspectionResultWriteOutcome(
             readbackAfterWrite,
             lastReadbackBeforeReturn);
     }
-}
-
-internal sealed record PlcTriggerClearWaitOutcome(
-    PlcTriggerClearResult Result,
-    PlcOutputReadback? LastReadback);
-
-internal enum PlcTriggerClearResult
-{
-    Cleared,
-    ReadbackFailed,
-    Timeout
 }

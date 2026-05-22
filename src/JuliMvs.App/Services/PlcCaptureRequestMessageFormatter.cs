@@ -7,7 +7,7 @@ internal static class PlcCaptureRequestMessageFormatter
         return reason switch
         {
             PlcCaptureRequestBlockReason.Stopped => new PlcCaptureRequestMessages(
-                LogMessage: "\u5f53\u524d\u4e3a\u505c\u6b62\u72b6\u6001\uff0c\u5df2\u5ffd\u7565PLC\u5b9a\u4f4d\u89e6\u53d1D1000=1\uff0c\u672a\u62cd\u7167\u3001\u672a\u5199\u7ed3\u679c\uff1b\u7b49\u5f85PLC\u6e05D1000\u540e\u624d\u5141\u8bb8\u4e0b\u4e00\u6b21\u89e6\u53d1\u3002",
+                LogMessage: "\u5f53\u524d\u4e3a\u505c\u6b62\u72b6\u6001\uff0c\u5df2\u5ffd\u7565PLC\u5b9a\u4f4d\u89e6\u53d1D1000=1\uff0c\u672a\u62cd\u7167\u3001\u672a\u5199\u7ed3\u679c\uff1b\u4e0a\u4f4d\u673a\u5c06\u6e05D1000=0\u3002",
                 UserMessage: "\u5f53\u524d\u4e3a\u505c\u6b62\u72b6\u6001\uff0cPLC\u89e6\u53d1\u5df2\u5ffd\u7565\u3002\u70b9\u51fb\u8fd0\u884c\u540e\u624d\u4f1a\u81ea\u52a8\u68c0\u6d4b\u3002",
                 PlcErrorMessage: null),
             PlcCaptureRequestBlockReason.ChangeoverTemplateRequested => new PlcCaptureRequestMessages(

@@ -112,7 +112,7 @@ public partial class MainWindow
                 {
                     await Dispatcher.InvokeAsync(() =>
                     {
-                        Log("PLC已清D1000=0，本轮标准握手结束，允许下一次触发。");
+                        Log("D1000=0，本轮标准握手结束，允许下一次触发。");
                     });
                 }
                 else if (pollingDecision.StartInspection)
