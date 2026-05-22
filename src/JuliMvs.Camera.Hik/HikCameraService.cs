@@ -13,6 +13,7 @@ public sealed class HikCameraService : ICameraService
     private MyCamera.MV_CC_DEVICE_INFO_LIST _deviceList = new();
     private MyCamera? _camera;
     private bool _isGrabbing;
+    private IReadOnlyList<string> _configurationWarnings = [];
 
     public bool IsOpen => _camera is not null;
 
@@ -65,6 +66,7 @@ public sealed class HikCameraService : ICameraService
             ThrowIfFailed(ret, "Open Hikvision camera failed");
 
             ConfigureCamera(camera, deviceInfo);
+            _configurationWarnings = ConfigureLowLatencyGrabbing(camera);
             StartGrabbing(camera);
             _camera = camera;
         }
@@ -84,7 +86,9 @@ public sealed class HikCameraService : ICameraService
             throw new InvalidOperationException("Camera is not open.");
         }
 
-        return ApplySettings(_camera, settings);
+        var warnings = new List<string>(_configurationWarnings);
+        warnings.AddRange(ApplySettings(_camera, settings));
+        return warnings;
     }
 
     private static bool IsDeviceAccessible(ref MyCamera.MV_CC_DEVICE_INFO deviceInfo)
@@ -115,6 +119,7 @@ public sealed class HikCameraService : ICameraService
                 StartGrabbing(_camera);
             }
 
+            TryClearImageBuffer(_camera);
             var frame = new MyCamera.MV_FRAME_OUT();
             try
             {
@@ -192,6 +197,29 @@ public sealed class HikCameraService : ICameraService
             (uint)MyCamera.MV_CAM_TRIGGER_MODE.MV_TRIGGER_MODE_OFF);
     }
 
+    private static IReadOnlyList<string> ConfigureLowLatencyGrabbing(MyCamera camera)
+    {
+        var warnings = new List<string>();
+        var ret = camera.MV_CC_SetImageNodeNum_NET(1);
+        if (ret != MyCamera.MV_OK)
+        {
+            warnings.Add($"海康相机缓存节点数设置为1失败: MVS error=0x{ret:X8}");
+        }
+
+        ret = camera.MV_CC_SetGrabStrategy_NET(MyCamera.MV_GRAB_STRATEGY.MV_GrabStrategy_LatestImagesOnly);
+        if (ret != MyCamera.MV_OK)
+        {
+            warnings.Add($"海康相机最新帧抓取策略设置失败: MVS error=0x{ret:X8}");
+        }
+
+        return warnings;
+    }
+
+    private static void TryClearImageBuffer(MyCamera camera)
+    {
+        camera.MV_CC_ClearImageBuffer_NET();
+    }
+
     private void StartGrabbing(MyCamera camera)
     {
         var ret = camera.MV_CC_StartGrabbing_NET();
@@ -205,6 +233,7 @@ public sealed class HikCameraService : ICameraService
 
         SetEnumValue(camera, "AcquisitionMode", "Continuous", (uint)MyCamera.MV_CAM_ACQUISITION_MODE.MV_ACQ_MODE_CONTINUOUS);
         SetEnumValue(camera, "TriggerMode", "Off", (uint)MyCamera.MV_CAM_TRIGGER_MODE.MV_TRIGGER_MODE_OFF);
+        warnings.AddRange(ConfigureLowLatencyGrabbing(camera));
 
         SetEnumValue(camera, "GainAuto", "Off", 0);
         SetFloatValue(camera, "Gain", settings.Gain);
