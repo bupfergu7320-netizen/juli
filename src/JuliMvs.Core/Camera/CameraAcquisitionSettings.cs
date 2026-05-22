@@ -8,7 +8,7 @@ public sealed record CameraAcquisitionSettings
 
     public double Gain { get; init; }
 
-    public double CaptureDelaySeconds { get; init; } = 0.3;
+    public double CaptureDelaySeconds { get; init; }
 
     public int AutoExposureTarget { get; init; } = 255;
 
