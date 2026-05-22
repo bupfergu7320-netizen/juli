@@ -1,0 +1,24 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <ItemGroup>
+    <ProjectReference Include="..\JuliMvs.Core\JuliMvs.Core.csproj" />
+    <ProjectReference Include="..\JuliMvs.Vision\JuliMvs.Vision.csproj" />
+    <ProjectReference Include="..\JuliMvs.Camera.Hik\JuliMvs.Camera.Hik.csproj" />
+    <ProjectReference Include="..\JuliMvs.Plc\JuliMvs.Plc.csproj" />
+    <ProjectReference Include="..\JuliMvs.Persistence\JuliMvs.Persistence.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="OpenCvSharp4" Version="4.13.0.20260427" />
+    <PackageReference Include="OpenCvSharp4.runtime.win" Version="4.13.0.20260302" />
+  </ItemGroup>
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <UseWPF>true</UseWPF>
+  </PropertyGroup>
+
+</Project>

@@ -1,0 +1,368 @@
+<Window x:Class="JuliMvs.App.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        mc:Ignorable="d"
+        Title="&#x51B2;&#x538B;&#x673A;&#x89C6;&#x89C9;&#x4E0A;&#x4F4D;&#x673A;"
+        Width="1920"
+        Height="1080"
+        MinWidth="1280"
+        MinHeight="720"
+        WindowStyle="None"
+        WindowState="Maximized"
+        ResizeMode="CanResize"
+        Background="#EEEEEE"
+        FontFamily="SimSun"
+        Loaded="Window_Loaded"
+        Closing="Window_Closing">
+    <Window.Resources>
+        <SolidColorBrush x:Key="PanelBackground" Color="#EEEEEE" />
+        <SolidColorBrush x:Key="BorderGray" Color="#8B8B8B" />
+        <SolidColorBrush x:Key="AccentBlue" Color="#12BDEB" />
+
+        <Style TargetType="TextBlock">
+            <Setter Property="TextOptions.TextFormattingMode" Value="Display" />
+            <Setter Property="Foreground" Value="Black" />
+        </Style>
+
+        <Style x:Key="HmiButton" TargetType="Button">
+            <Setter Property="Height" Value="42" />
+            <Setter Property="Padding" Value="12,0" />
+            <Setter Property="FontSize" Value="22" />
+            <Setter Property="FontFamily" Value="SimSun" />
+            <Setter Property="Background" Value="#F0F0F0" />
+            <Setter Property="Foreground" Value="Black" />
+            <Setter Property="BorderBrush" Value="#808080" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border Background="{TemplateBinding Background}"
+                                BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="{TemplateBinding BorderThickness}">
+                            <ContentPresenter HorizontalAlignment="Center"
+                                              VerticalAlignment="Center" />
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter Property="Background" Value="#D9E5FA" />
+                            </Trigger>
+                            <Trigger Property="IsPressed" Value="True">
+                                <Setter Property="Background" Value="#C6D2E8" />
+                            </Trigger>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter Property="Foreground" Value="#A8A8A8" />
+                                <Setter Property="Background" Value="#EEEEEE" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style x:Key="NavButton" TargetType="Button" BasedOn="{StaticResource HmiButton}">
+            <Setter Property="Height" Value="44" />
+            <Setter Property="HorizontalContentAlignment" Value="Left" />
+            <Setter Property="FontSize" Value="31" />
+            <Setter Property="Padding" Value="24,0,0,0" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="Background" Value="Transparent" />
+        </Style>
+
+        <Style x:Key="SelectedNavButton" TargetType="Button" BasedOn="{StaticResource NavButton}">
+            <Setter Property="Background" Value="#CBD5E8" />
+            <Setter Property="BorderBrush" Value="#2C4C98" />
+            <Setter Property="BorderThickness" Value="1" />
+        </Style>
+
+        <Style TargetType="TextBox">
+            <Setter Property="Height" Value="34" />
+            <Setter Property="FontSize" Value="20" />
+            <Setter Property="FontFamily" Value="Consolas" />
+            <Setter Property="VerticalContentAlignment" Value="Center" />
+            <Setter Property="Padding" Value="4,0" />
+            <Setter Property="Background" Value="#F8F8F8" />
+            <Setter Property="BorderBrush" Value="#B8B8B8" />
+        </Style>
+
+        <Style TargetType="GroupBox">
+            <Setter Property="BorderBrush" Value="#A0A0A0" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="Background" Value="#EEEEEE" />
+            <Setter Property="FontSize" Value="18" />
+            <Setter Property="FontFamily" Value="SimSun" />
+        </Style>
+    </Window.Resources>
+
+    <Grid Background="#EEEEEE">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="60" />
+            <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
+        <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="215" />
+            <ColumnDefinition Width="*" />
+            <ColumnDefinition Width="580" />
+        </Grid.ColumnDefinitions>
+
+        <Border Grid.Row="0"
+                Grid.ColumnSpan="3"
+                Background="#F7F7F7"
+                BorderBrush="#D6D6D6"
+                BorderThickness="0,0,0,1"
+                MouseLeftButtonDown="Window_MouseLeftButtonDown">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="185" />
+                    <ColumnDefinition Width="52" />
+                    <ColumnDefinition Width="52" />
+                </Grid.ColumnDefinitions>
+
+                <Grid Grid.Column="0" Width="405" Height="60">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="74" />
+                        <ColumnDefinition Width="*" />
+                    </Grid.ColumnDefinitions>
+                    <Viewbox Grid.Column="0" Margin="0,6,6,6">
+                        <Canvas Width="70" Height="48">
+                            <Polygon Points="8,36 26,8 36,34 46,8 64,36 50,44 36,38 20,44"
+                                     Fill="#2F3333" />
+                            <Ellipse Canvas.Left="18" Canvas.Top="28" Width="34" Height="12" Fill="#2F3333" />
+                        </Canvas>
+                    </Viewbox>
+                    <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                        <TextBlock Text="&#x8346;&#x5DDE;&#x949C;&#x529B;&#x673A;&#x68B0;&#x79D1;&#x6280;&#x6709;&#x9650;&#x516C;&#x53F8;"
+                                   FontSize="25"
+                                   FontWeight="Bold"
+                                   Foreground="#333333" />
+                        <TextBlock Text="JINGZHOUJULI MECHANICAL TECHNOLOGY CO.,LTD."
+                                   FontFamily="Arial"
+                                   FontSize="13"
+                                   Foreground="#333333"
+                                   Margin="0,3,0,0" />
+                    </StackPanel>
+                </Grid>
+
+                <Button Grid.Column="2"
+                        Content="&#x5C0F;&#x952E;&#x76D8;"
+                        Style="{StaticResource HmiButton}"
+                        FontSize="30"
+                        Height="50"
+                        Margin="0,5,14,5"
+                        Click="Keyboard_Click" />
+                <Button Grid.Column="3"
+                        Content="&#xFF0D;"
+                        Style="{StaticResource HmiButton}"
+                        FontSize="38"
+                        Height="50"
+                        Margin="0,5,10,5"
+                        Click="Minimize_Click" />
+                <Button Grid.Column="4"
+                        Content="X"
+                        Style="{StaticResource HmiButton}"
+                        FontFamily="Arial"
+                        FontSize="30"
+                        FontWeight="Bold"
+                        Height="50"
+                        Margin="0,5,14,5"
+                        Click="CloseWindow_Click" />
+            </Grid>
+        </Border>
+
+        <Grid Grid.Row="1" Grid.Column="0" Background="#EEEEEE">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="*" />
+                <RowDefinition Height="Auto" />
+            </Grid.RowDefinitions>
+
+            <StackPanel Grid.Row="0" Margin="18,8,17,0">
+                <Viewbox Width="64" Height="64" HorizontalAlignment="Center">
+                    <Canvas Width="64" Height="64">
+                        <Ellipse Canvas.Left="20" Canvas.Top="0" Width="24" Height="24" Fill="Black" />
+                        <Path Data="M8,54 C12,36 52,36 56,54 C44,66 20,66 8,54 Z"
+                              Fill="Black" />
+                        <Path Data="M8,54 C12,36 52,36 56,54 C44,66 20,66 8,54 Z"
+                              Stroke="#00F000"
+                              StrokeThickness="2" />
+                    </Canvas>
+                </Viewbox>
+                <Border x:Name="CurrentUserBadge"
+                        Background="#F7F7F7"
+                        BorderBrush="#808080"
+                        BorderThickness="1"
+                        Cursor="Hand"
+                        Height="50"
+                        Margin="1,4,0,18"
+                        MouseLeftButtonUp="CurrentUser_Click">
+                    <TextBlock x:Name="CurrentUserText"
+                               Text="&#x5F53;&#x524D;&#x7528;&#x6237;:&#x64CD;&#x4F5C;&#x5458;"
+                               FontSize="21"
+                               FontWeight="Bold"
+                               HorizontalAlignment="Center"
+                               VerticalAlignment="Center"
+                               TextAlignment="Center"
+                               TextWrapping="NoWrap" />
+                </Border>
+
+                <Border x:Name="SystemStatusBadge"
+                        Background="#FF1010"
+                        BorderBrush="#808080"
+                        BorderThickness="1"
+                        Height="54"
+                        Margin="1,0,0,6"
+                        Cursor="Hand"
+                        MouseLeftButtonUp="RunStop_Click">
+                    <TextBlock x:Name="SystemStatusText"
+                               Text="&#x8FD0;&#x884C;"
+                               FontSize="24"
+                               FontWeight="Bold"
+                               HorizontalAlignment="Center"
+                               VerticalAlignment="Center"
+                               TextAlignment="Center"
+                               TextWrapping="NoWrap"
+                               TextTrimming="None" />
+                </Border>
+
+                <Button x:Name="CameraSettingsNavButton"
+                        Content="&#x25EB;  &#x76F8;&#x673A;&#x8BBE;&#x7F6E;"
+                        Style="{StaticResource NavButton}"
+                        Click="CameraSettings_Click"
+                        Margin="1,0,0,3" />
+                <Button x:Name="TurntablePositionNavButton"
+                        Content="&#x25CB;  PLC&#x901A;&#x4FE1;"
+                        Style="{StaticResource NavButton}"
+                        Foreground="Red"
+                        Click="PlcSettings_Click"
+                        Margin="1,0,0,3" />
+                <Button x:Name="PhotoTestNavButton"
+                        Content="&#x25CE;  &#x62CD;&#x7167;&#x6D4B;&#x8BD5;"
+                        Style="{StaticResource NavButton}"
+                        Foreground="#005A9E"
+                        Click="PhotoTest_Click"
+                        Margin="1,0,0,3" />
+                <Button x:Name="NewBatchButton"
+                        Content="&#x224B;    &#x6362;&#x578B;"
+                        Style="{StaticResource SelectedNavButton}"
+                        Click="Changeover_Click"
+                        Margin="1,0,0,3" />
+            </StackPanel>
+        </Grid>
+
+        <Grid Grid.Row="1" Grid.Column="1" Margin="0,66,35,53">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="40" />
+                <RowDefinition Height="*" />
+            </Grid.RowDefinitions>
+            <Border Grid.Row="0" Background="{StaticResource AccentBlue}">
+                <TextBlock Text="&#x76F8;&#x673A;1"
+                           FontSize="29"
+                           HorizontalAlignment="Center"
+                           VerticalAlignment="Center" />
+            </Border>
+            <Border Grid.Row="1" Background="Black">
+                <Image x:Name="ResultImage"
+                       Stretch="Uniform"
+                       SnapsToDevicePixels="True" />
+            </Border>
+        </Grid>
+
+        <Grid Grid.Row="1" Grid.Column="2" Margin="0,66,48,20">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="*" />
+                <RowDefinition Height="48" />
+            </Grid.RowDefinitions>
+
+            <GroupBox Grid.Row="0" Margin="0,2,0,10">
+                <GroupBox.Header>
+                    <TextBlock Text="&#x8FD0;&#x884C;&#x72B6;&#x6001;"
+                               FontSize="18"
+                               MinWidth="92"
+                               TextWrapping="NoWrap" />
+                </GroupBox.Header>
+                <Grid Margin="18">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="*" />
+                    </Grid.RowDefinitions>
+                    <Border Grid.RowSpan="2"
+                            Background="White"
+                            BorderBrush="#888888"
+                            BorderThickness="1" />
+                    <Grid Grid.RowSpan="2" Margin="0">
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="*" />
+                        </Grid.RowDefinitions>
+                        <TextBlock x:Name="MessageText"
+                                   Text="-"
+                                   FontSize="18"
+                                   FontWeight="Bold"
+                                   TextWrapping="Wrap"
+                                   Margin="8,8,8,6" />
+                        <ListBox x:Name="LogList"
+                                 Grid.Row="1"
+                                 FontFamily="SimSun"
+                                 FontSize="15"
+                                 Background="White"
+                                 Foreground="Black"
+                                 BorderBrush="#A0A0A0"
+                                 ScrollViewer.VerticalScrollBarVisibility="Auto"
+                                 ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+                            <ListBox.ItemContainerStyle>
+                                <Style TargetType="ListBoxItem">
+                                    <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+                                </Style>
+                            </ListBox.ItemContainerStyle>
+                            <ListBox.ItemTemplate>
+                                <DataTemplate>
+                                    <TextBlock Text="{Binding}"
+                                               TextWrapping="Wrap" />
+                                </DataTemplate>
+                            </ListBox.ItemTemplate>
+                        </ListBox>
+                    </Grid>
+                </Grid>
+            </GroupBox>
+
+            <Grid Grid.Row="1">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <TextBlock Text="&#x7248;&#x672C;&#xFF1A; V3.0.0"
+                           FontSize="30"
+                           Foreground="#00A7F4"
+                           VerticalAlignment="Center" />
+                <TextBlock x:Name="CameraText"
+                           Grid.Column="2"
+                           Text="&#x76F8;&#x673A;&#x901A;&#x8BAF;&#x672A;&#x8FDE;&#x63A5;"
+                           Background="#FF1A1A"
+                           Foreground="Black"
+                           FontSize="25"
+                           Padding="8,2"
+                           Margin="8,4"
+                           VerticalAlignment="Center"
+                           TextTrimming="CharacterEllipsis"
+                           MaxWidth="180" />
+                <TextBlock x:Name="PlcText"
+                           Grid.Column="3"
+                           Text="PLC&#x901A;&#x8BAF;&#x672A;&#x8FDE;&#x63A5;"
+                           Background="#FF1A1A"
+                           Foreground="Black"
+                           FontSize="25"
+                           Padding="8,2"
+                           Margin="8,4,0,4"
+                           VerticalAlignment="Center"
+                           TextTrimming="CharacterEllipsis"
+                           MaxWidth="180" />
+            </Grid>
+        </Grid>
+
+    </Grid>
+</Window>
