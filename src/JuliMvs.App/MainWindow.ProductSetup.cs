@@ -60,10 +60,16 @@ public partial class MainWindow
     {
         await LoadRecipeAsync(productName, showMessageWhenMissing: false);
 
-        var template = await _repository.LoadLatestTemplateAsync(productName);
-        if (template is null)
+        var loadedTemplate = await _repository.LoadLatestTemplateAsync(productName);
+        if (loadedTemplate is null)
         {
             return false;
+        }
+
+        var template = _templateImagePathResolver.Resolve(loadedTemplate);
+        if (!string.Equals(template.ImagePath, loadedTemplate.ImagePath, StringComparison.OrdinalIgnoreCase))
+        {
+            Log($"模板图片路径已重定位: {loadedTemplate.ImagePath} -> {template.ImagePath}");
         }
 
         var activeParameters = ReadVisionParameters();

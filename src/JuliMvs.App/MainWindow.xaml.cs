@@ -77,6 +77,7 @@ public partial class MainWindow : System.Windows.Window
     private readonly InspectionFileStore _inspectionFileStore;
     private readonly InspectionReportWriter _inspectionReportWriter;
     private readonly ChangeoverTemplateReportWriter _changeoverTemplateReportWriter;
+    private readonly TemplateImagePathResolver _templateImagePathResolver;
     private readonly MachineSettingsStore _machineSettingsStore;
     private readonly LocalAppSettingsStore _localAppSettingsStore;
     private readonly CalibrationFileStore _calibrationFileStore;
@@ -137,6 +138,7 @@ public partial class MainWindow : System.Windows.Window
         _inspectionFileStore = new InspectionFileStore(AppContext.BaseDirectory);
         _inspectionReportWriter = new InspectionReportWriter(AppContext.BaseDirectory, LocalJsonOptions);
         _changeoverTemplateReportWriter = new ChangeoverTemplateReportWriter(AppContext.BaseDirectory, LocalJsonOptions);
+        _templateImagePathResolver = new TemplateImagePathResolver(AppContext.BaseDirectory);
         _inspectionRunCoordinator = new InspectionRunCoordinator(
             _visionService,
             _repository,
