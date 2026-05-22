@@ -40,12 +40,16 @@ public partial class MainWindow
                 ? settings.PlcPort
                 : DefaultPlcPort;
             _cameraSettings = settings?.CameraSettings ?? CameraAcquisitionSettings.Default;
+            _currentProductName = string.IsNullOrWhiteSpace(settings?.CurrentProductName)
+                ? DefaultProductName
+                : settings.CurrentProductName.Trim();
         }
         catch (Exception ex)
         {
             _cameraIpAddress = DefaultCameraIpAddress;
             _plcIpAddress = DefaultPlcIpAddress;
             _plcPort = DefaultPlcPort;
+            _currentProductName = DefaultProductName;
             _cameraSettings = CameraAcquisitionSettings.Default;
             Log($"本机配置读取失败，使用默认相机IP {DefaultCameraIpAddress}: {ex.Message}");
         }
@@ -305,7 +309,8 @@ public partial class MainWindow
             _cameraIpAddress.Trim(),
             _plcIpAddress.Trim(),
             _plcPort,
-            _cameraSettings);
+            _cameraSettings,
+            _currentProductName.Trim());
         _localAppSettingsStore.Save(settings);
     }
 }

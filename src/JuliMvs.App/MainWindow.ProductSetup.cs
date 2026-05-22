@@ -25,6 +25,35 @@ namespace JuliMvs.App;
 
 public partial class MainWindow
 {
+    private async Task TryEnterSimpleProductionModeAsync()
+    {
+        var productName = _currentProductName.Trim();
+        if (string.IsNullOrWhiteSpace(productName))
+        {
+            productName = DefaultProductName;
+            _currentProductName = productName;
+        }
+
+        try
+        {
+            var batchNo = BatchNumberGenerator.GenerateDefaultBatchNo();
+            if (await StartBatchWithLatestTemplateAsync(batchNo, productName))
+            {
+                _productionEnabled = true;
+                UpdateRunStopUi();
+                SaveLocalSettings();
+                Log($"最简生产模式已就绪: 型号 {productName}, 批次 {batchNo}, 等待PLC触发D1000=1。");
+            }
+        }
+        catch (Exception ex)
+        {
+            _productionEnabled = false;
+            UpdateRunStopUi();
+            MessageText.Text = $"最简生产模式未就绪: {ex.Message}";
+            Log(MessageText.Text);
+        }
+    }
+
     private async Task<bool> StartBatchWithLatestTemplateAsync(string batchNo, string productName)
     {
         RequireMachineCalibrationReady();
@@ -37,6 +66,7 @@ public partial class MainWindow
         }
 
         _currentBatchNo = batchNo;
+        _currentProductName = productName.Trim();
         _batchSession = BatchSession.Empty();
         _batchSession.Start(batchNo, productName);
         ClearCurrentInspection();
@@ -47,6 +77,7 @@ public partial class MainWindow
         {
             _batchSession.MarkTemplateCreated();
             _batchSession.ConfirmFirstArticle();
+            SaveLocalSettings();
             MessageText.Text = "产品配方和标准位/模板已加载，等待PLC触发拍照检测。";
             return true;
         }

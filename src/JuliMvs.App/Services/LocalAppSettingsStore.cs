@@ -45,4 +45,5 @@ internal sealed record LocalAppSettings(
     string CameraIpAddress,
     string PlcIpAddress,
     int PlcPort,
-    CameraAcquisitionSettings CameraSettings);
+    CameraAcquisitionSettings CameraSettings,
+    string? CurrentProductName = null);

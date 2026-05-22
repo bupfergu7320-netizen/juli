@@ -35,12 +35,13 @@ public partial class MainWindow
             await _repository.InitializeAsync();
             _currentUserRole = UserRole.Operator;
             UpdateUserRoleUi();
-            _productionEnabled = true;
+            _productionEnabled = false;
             UpdateRunStopUi();
             SetCameraStatus("相机通讯未连接", isNormal: false);
             SetPlcStatus("PLC通讯未连接", isNormal: false);
             Log("数据库已初始化");
-            Log("上位机启动后自动进入运行状态，开始自动连接相机和PLC");
+            await TryEnterSimpleProductionModeAsync();
+            Log("上位机启动后自动连接相机和PLC");
             _ = AutoStartConnectionsAsync();
         }
         catch (Exception ex)
@@ -54,9 +55,17 @@ public partial class MainWindow
         }
     }
 
-    private void RunStop_Click(object sender, MouseButtonEventArgs e)
+    private async void RunStop_Click(object sender, MouseButtonEventArgs e)
     {
-        if (!_productionEnabled && !IsMachineCalibrationReady(out var message))
+        if (_productionEnabled)
+        {
+            _productionEnabled = false;
+            UpdateRunStopUi();
+            Log("上位机当前为已停止，PLC触发将被忽略");
+            return;
+        }
+
+        if (!IsMachineCalibrationReady(out var message))
         {
             MessageText.Text = message;
             Log(message);
@@ -64,9 +73,20 @@ public partial class MainWindow
             return;
         }
 
-        _productionEnabled = !_productionEnabled;
+        if (!_batchSession.CanInspect || _template is null)
+        {
+            await TryEnterSimpleProductionModeAsync();
+            if (!_productionEnabled)
+            {
+                MessageBox.Show(MessageText.Text, "生产模式", MessageBoxButton.OK, MessageBoxImage.Warning);
+            }
+
+            return;
+        }
+
+        _productionEnabled = true;
         UpdateRunStopUi();
-        Log(_productionEnabled ? "上位机当前为运行中，允许PLC触发自动检测" : "上位机当前为已停止，PLC触发将被忽略");
+        Log("上位机当前为运行中，允许PLC触发自动检测");
     }
 
     private void CurrentUser_Click(object sender, MouseButtonEventArgs e)

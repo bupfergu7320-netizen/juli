@@ -1,10 +1,14 @@
 using JuliMvs.App.Services;
+using JuliMvs.Core.Camera;
+using System.Text.Json;
 
 VerifyOldPublishedDataPathResolvesUnderCurrentBaseDirectory();
 VerifyExistingPathIsPreserved();
 VerifyUnmatchedMissingPathIsPreserved();
+VerifyLocalSettingsKeepsCurrentProductName();
+VerifyLegacyLocalSettingsDefaultsCurrentProductName();
 
-Console.WriteLine("Template image path resolver keeps template images portable across published folder copies.");
+Console.WriteLine("App services keep template images portable and local settings backward-compatible.");
 
 static void VerifyOldPublishedDataPathResolvesUnderCurrentBaseDirectory()
 {
@@ -55,6 +59,50 @@ static void VerifyUnmatchedMissingPathIsPreserved()
     var resolved = resolver.ResolvePath(missingPath);
 
     AssertEqual(missingPath, resolved, "unmatched missing path");
+}
+
+static void VerifyLocalSettingsKeepsCurrentProductName()
+{
+    var testRoot = CreateTempDirectory();
+    var store = new LocalAppSettingsStore(testRoot, new JsonSerializerOptions { WriteIndented = true });
+    store.Save(new LocalAppSettings(
+        "192.168.10.11",
+        "192.168.3.40",
+        502,
+        CameraAcquisitionSettings.Default,
+        "MODEL-2026"));
+
+    var loaded = store.Load() ?? throw new InvalidOperationException("settings should load");
+
+    AssertEqual("MODEL-2026", loaded.CurrentProductName, "current product name");
+}
+
+static void VerifyLegacyLocalSettingsDefaultsCurrentProductName()
+{
+    var testRoot = CreateTempDirectory();
+    var configDirectory = Path.Combine(testRoot, "Data", "Config");
+    Directory.CreateDirectory(configDirectory);
+    File.WriteAllText(
+        Path.Combine(configDirectory, "appsettings.json"),
+        """
+        {
+          "CameraIpAddress": "192.168.10.11",
+          "PlcIpAddress": "192.168.3.40",
+          "PlcPort": 502,
+          "CameraSettings": {
+            "ExposureTimeMicroseconds": 8000,
+            "Gain": 0,
+            "CaptureDelaySeconds": 0.3,
+            "AutoExposureTarget": 255,
+            "AutoExposureEnabled": false
+          }
+        }
+        """);
+
+    var store = new LocalAppSettingsStore(testRoot, new JsonSerializerOptions());
+    var loaded = store.Load() ?? throw new InvalidOperationException("legacy settings should load");
+
+    AssertEqual(null, loaded.CurrentProductName, "legacy current product name");
 }
 
 static string CreateTempDirectory()

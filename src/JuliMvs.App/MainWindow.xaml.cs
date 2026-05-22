@@ -33,6 +33,7 @@ public partial class MainWindow : System.Windows.Window
     private const string RAxisCenterCaptureTargetBoard = "7x7-calibration-board-center-dot";
     private const string DefaultCameraIpAddress = "192.168.10.11";
     private const string DefaultPlcIpAddress = "192.168.3.40";
+    private const string DefaultProductName = "PART-A";
     private const int DefaultPlcPort = 502;
     private const int CameraCaptureTimeoutMilliseconds = 1200;
     private const double MaximumAcceptedLensDistortionRmsPixels = 0.60;
@@ -98,7 +99,7 @@ public partial class MainWindow : System.Windows.Window
     private CameraDeviceInfo? _connectedCameraInfo;
     private CameraAcquisitionSettings _cameraSettings = CameraAcquisitionSettings.Default;
     private string _currentBatchNo = string.Empty;
-    private string _currentProductName = "PART-A";
+    private string _currentProductName = DefaultProductName;
     private string _cameraIpAddress = DefaultCameraIpAddress;
     private string _plcIpAddress = DefaultPlcIpAddress;
     private int _plcPort = DefaultPlcPort;
