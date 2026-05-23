@@ -412,7 +412,22 @@ public partial class MainWindow
             $"结果: {result.Decision}  原因: {FormatNgReason(result)}",
             $"耗时: 总{totalElapsedMilliseconds}ms  拍照{captureElapsedMilliseconds}ms  检测/存储{inspectionElapsedMilliseconds}ms  显示{renderElapsedMilliseconds}ms  PLC{plcElapsedMilliseconds}ms",
             $"\u660e\u7ec6: \u89c6\u89c9{timings.VisionMs}ms  \u8bb0\u5f55{timings.SaveResultMs}ms  \u56fe{timings.SaveDiagnosticImageMs}ms  \u62a5\u544a{timings.SaveReportMs}ms",
+            FormatVisionStageTimingLine(timings.StageTimings),
             FormatRuntimeXyrLine(result));
+    }
+
+    private static string FormatVisionStageTimingLine(VisionStageTimings timings)
+    {
+        return
+            "视觉明细: " +
+            $"畸变/预处理{timings.PrepareImageMs}ms  " +
+            $"找轮廓{timings.DetectPartMs}ms  " +
+            $"角度{timings.ResolveAngleMs}ms  " +
+            $"模板相似{timings.TemplateSimilarityMs}ms  " +
+            $"XYR{timings.AlignmentMs}ms  " +
+            $"判定{timings.DecisionMs}ms  " +
+            $"正反面{timings.FrontBackMs}ms  " +
+            $"叠加{timings.OverlayMs}ms";
     }
 
     private static string FormatNgReason(InspectionResult result)

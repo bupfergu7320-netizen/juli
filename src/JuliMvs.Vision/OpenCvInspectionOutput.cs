@@ -13,7 +13,8 @@ public sealed record OpenCvInspectionOutput
         IReadOnlyList<ContourCandidateDiagnostic>? candidateDiagnostics = null,
         AngleResolutionDiagnostic? angleDiagnostic = null,
         TemplateSimilarityResult? templateSimilarity = null,
-        ContourMirrorFaceDebugResult? frontBackDecisionDiagnostic = null)
+        ContourMirrorFaceDebugResult? frontBackDecisionDiagnostic = null,
+        VisionStageTimings? stageTimings = null)
     {
         Result = result;
         DiagnosticImage = diagnosticImage;
@@ -22,6 +23,7 @@ public sealed record OpenCvInspectionOutput
         AngleDiagnostic = angleDiagnostic;
         TemplateSimilarity = templateSimilarity;
         FrontBackDecisionDiagnostic = frontBackDecisionDiagnostic;
+        StageTimings = stageTimings ?? VisionStageTimings.Empty;
     }
 
     public InspectionResult Result { get; init; }
@@ -37,4 +39,19 @@ public sealed record OpenCvInspectionOutput
     public TemplateSimilarityResult? TemplateSimilarity { get; init; }
 
     public ContourMirrorFaceDebugResult? FrontBackDecisionDiagnostic { get; init; }
+
+    public VisionStageTimings StageTimings { get; init; }
+}
+
+public sealed record VisionStageTimings(
+    long PrepareImageMs,
+    long DetectPartMs,
+    long ResolveAngleMs,
+    long TemplateSimilarityMs,
+    long AlignmentMs,
+    long DecisionMs,
+    long FrontBackMs,
+    long OverlayMs)
+{
+    public static VisionStageTimings Empty { get; } = new(0, 0, 0, 0, 0, 0, 0, 0);
 }

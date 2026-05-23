@@ -2,6 +2,7 @@ using JuliMvs.Core;
 using JuliMvs.Core.Inspection;
 using JuliMvs.Core.Vision;
 using OpenCvSharp;
+using System.Diagnostics;
 
 namespace JuliMvs.Vision;
 
@@ -213,15 +214,19 @@ public sealed class OpenCvVisionService
 
         var activeParameters = parameters ?? template.Parameters;
         EnsureProductionSetup(image, template, activeParameters);
-        using var workingImage = PrepareImage(image, activeParameters);
+        var stageTimings = new VisionStageTimingBuilder();
+        using var workingImage = stageTimings.MeasurePrepareImage(() => PrepareImage(image, activeParameters));
         var diagnostic = buildDiagnosticImage ? EnsureBgr(workingImage) : new Mat();
-        var detection = DetectPartPrepared(
-            workingImage,
-            activeParameters,
-            template,
-            out var candidateDiagnostics,
-            out var candidateDetections,
-            buildDiagnostics: buildDiagnosticImage);
+        IReadOnlyList<ContourCandidateDiagnostic> candidateDiagnostics = Array.Empty<ContourCandidateDiagnostic>();
+        IReadOnlyList<PartDetection> candidateDetections = Array.Empty<PartDetection>();
+        var detection = stageTimings.MeasureDetectPart(() =>
+            DetectPartPrepared(
+                workingImage,
+                activeParameters,
+                template,
+                out candidateDiagnostics,
+                out candidateDetections,
+                buildDiagnostics: buildDiagnosticImage));
         var resolvedPartNo = string.IsNullOrWhiteSpace(partNo)
             ? DateTimeOffset.Now.ToString("yyyyMMddHHmmssfff")
             : partNo;
@@ -238,7 +243,11 @@ public sealed class OpenCvVisionService
                 Cv2.PutText(diagnostic, "MATCH FAILED", new Point(24, 48), HersheyFonts.HersheySimplex, 1.2, Scalar.Red, 2);
             }
 
-            return new OpenCvInspectionOutput(error, diagnostic, candidateDiagnostics: candidateDiagnostics);
+            return new OpenCvInspectionOutput(
+                error,
+                diagnostic,
+                candidateDiagnostics: candidateDiagnostics,
+                stageTimings: stageTimings.Build());
         }
 
         if (buildDiagnosticImage)
@@ -251,51 +260,62 @@ public sealed class OpenCvVisionService
 
         var referenceCenter = GetReferenceCenterMachine(template, activeParameters);
         var currentCenter = activeParameters.CameraCalibration.PixelToMachine(detection.CenterXPixel, detection.CenterYPixel);
-        var resolvedAngle = ResolveInspectionAngle(
-            workingImage,
-            detection,
-            template,
-            activeParameters,
-            buildDiagnostics: buildDiagnosticImage);
+        var resolvedAngle = stageTimings.MeasureResolveAngle(() =>
+            ResolveInspectionAngle(
+                workingImage,
+                detection,
+                template,
+                activeParameters,
+                buildDiagnostics: buildDiagnosticImage));
         var angleDiagnostic = BuildAngleDiagnostic(activeParameters, detection.AngleDegrees, resolvedAngle);
-        var similarity = CalculateTemplateSimilarity(
-            workingImage,
-            detection,
-            template,
-            activeParameters,
-            resolvedAngle.AngleDegrees);
+        var similarity = stageTimings.MeasureTemplateSimilarity(() =>
+            CalculateTemplateSimilarity(
+                workingImage,
+                detection,
+                template,
+                activeParameters,
+                resolvedAngle.AngleDegrees));
         var matchScore = similarity?.FinalScore ?? CalculateMatchScore(detection, template);
-        var alignmentSnapshot = XyrAlignmentSolver.Solve(
-            new PartPose2D(currentCenter.XMm, currentCenter.YMm, resolvedAngle.AngleDegrees, matchScore),
-            new PartPose2D(
-                referenceCenter.XMm,
-                referenceCenter.YMm,
-                template.ReferenceAngleDegrees,
-                template.MatchScoreBaseline),
-            activeParameters.RAxisCenterCalibration,
-            activeParameters.InvertRotationCompensation ? -1 : 1,
-            resolvedAngle.AllowsFullRotation);
+        var alignmentSnapshot = stageTimings.MeasureAlignment(() =>
+            XyrAlignmentSolver.Solve(
+                new PartPose2D(currentCenter.XMm, currentCenter.YMm, resolvedAngle.AngleDegrees, matchScore),
+                new PartPose2D(
+                    referenceCenter.XMm,
+                    referenceCenter.YMm,
+                    template.ReferenceAngleDegrees,
+                    template.MatchScoreBaseline),
+                activeParameters.RAxisCenterCalibration,
+                activeParameters.InvertRotationCompensation ? -1 : 1,
+                resolvedAngle.AllowsFullRotation));
         var angleOffset = alignmentSnapshot.AngleOffsetDegrees;
         var rotateCompensation = alignmentSnapshot.HomeRActionDegrees;
 
-        var decision = DecideSingleShot(
-            angleOffset,
-            rotateCompensation,
-            activeParameters.AngleToleranceDegrees,
-            activeParameters.ShapeScoreThreshold,
-            angleDiagnostic,
-            similarity,
-            matchScore,
-            out var reason,
-            out var message);
-        var frontBackDecisionDiagnostic = TryApplyBackSideNg(
-            detection,
-            template,
-            activeParameters,
-            buildDiagnostics: buildDiagnosticImage,
-            ref decision,
-            ref reason,
-            ref message);
+        NgReason reason = NgReason.None;
+        var message = string.Empty;
+        var decision = stageTimings.MeasureDecision(() =>
+            DecideSingleShot(
+                angleOffset,
+                rotateCompensation,
+                activeParameters.AngleToleranceDegrees,
+                activeParameters.ShapeScoreThreshold,
+                angleDiagnostic,
+                similarity,
+                matchScore,
+                out reason,
+                out message));
+        var finalReason = reason;
+        var finalMessage = message;
+        var frontBackDecisionDiagnostic = stageTimings.MeasureFrontBack(() =>
+            TryApplyBackSideNg(
+                detection,
+                template,
+                activeParameters,
+                buildDiagnostics: buildDiagnosticImage,
+                ref decision,
+                ref finalReason,
+                ref finalMessage));
+        reason = finalReason;
+        message = finalMessage;
         var rotateCompensationForOutput = decision == InspectionDecision.Ok
             ? rotateCompensation
             : 0.0;
@@ -321,7 +341,7 @@ public sealed class OpenCvVisionService
 
         if (buildDiagnosticImage)
         {
-            DrawOverlay(diagnostic, decision, message, measurement, angleDiagnostic, similarity);
+            stageTimings.MeasureOverlay(() => DrawOverlay(diagnostic, decision, message, measurement, angleDiagnostic, similarity));
         }
 
         var result = InspectionResult.FromMeasurement(
@@ -340,7 +360,8 @@ public sealed class OpenCvVisionService
             candidateDiagnostics,
             angleDiagnostic,
             similarity,
-            frontBackDecisionDiagnostic);
+            frontBackDecisionDiagnostic,
+            stageTimings.Build());
     }
 
     public PartDetection? DetectPart(Mat image, VisionParameters parameters)
@@ -726,6 +747,62 @@ public sealed class OpenCvVisionService
             sizeMm.WidthMm,
             sizeMm.HeightMm,
             area);
+    }
+
+    private sealed class VisionStageTimingBuilder
+    {
+        private long _prepareImageMs;
+        private long _detectPartMs;
+        private long _resolveAngleMs;
+        private long _templateSimilarityMs;
+        private long _alignmentMs;
+        private long _decisionMs;
+        private long _frontBackMs;
+        private long _overlayMs;
+
+        public T MeasurePrepareImage<T>(Func<T> action) => Measure(action, ref _prepareImageMs);
+
+        public T MeasureDetectPart<T>(Func<T> action) => Measure(action, ref _detectPartMs);
+
+        public T MeasureResolveAngle<T>(Func<T> action) => Measure(action, ref _resolveAngleMs);
+
+        public T MeasureTemplateSimilarity<T>(Func<T> action) => Measure(action, ref _templateSimilarityMs);
+
+        public T MeasureAlignment<T>(Func<T> action) => Measure(action, ref _alignmentMs);
+
+        public T MeasureDecision<T>(Func<T> action) => Measure(action, ref _decisionMs);
+
+        public T MeasureFrontBack<T>(Func<T> action) => Measure(action, ref _frontBackMs);
+
+        public void MeasureOverlay(Action action)
+        {
+            var stopwatch = Stopwatch.StartNew();
+            action();
+            stopwatch.Stop();
+            _overlayMs += stopwatch.ElapsedMilliseconds;
+        }
+
+        public VisionStageTimings Build()
+        {
+            return new VisionStageTimings(
+                _prepareImageMs,
+                _detectPartMs,
+                _resolveAngleMs,
+                _templateSimilarityMs,
+                _alignmentMs,
+                _decisionMs,
+                _frontBackMs,
+                _overlayMs);
+        }
+
+        private static T Measure<T>(Func<T> action, ref long elapsedMilliseconds)
+        {
+            var stopwatch = Stopwatch.StartNew();
+            var result = action();
+            stopwatch.Stop();
+            elapsedMilliseconds += stopwatch.ElapsedMilliseconds;
+            return result;
+        }
     }
 
     private static Mat ExtractRoi(Mat image, ImageRoi roi, out Point offset)

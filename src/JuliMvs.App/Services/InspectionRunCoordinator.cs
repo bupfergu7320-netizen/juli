@@ -113,7 +113,8 @@ internal sealed class InspectionRunCoordinator
                 visionStopwatch.ElapsedMilliseconds,
                 saveResultStopwatch.ElapsedMilliseconds,
                 diagnosticImageStopwatch.ElapsedMilliseconds,
-                reportStopwatch.ElapsedMilliseconds),
+                reportStopwatch.ElapsedMilliseconds,
+                output.StageTimings),
             logs,
             request.FrontBackDebug);
     }
@@ -148,4 +149,5 @@ internal sealed record InspectionRunTimings(
     long VisionMs,
     long SaveResultMs,
     long SaveDiagnosticImageMs,
-    long SaveReportMs);
+    long SaveReportMs,
+    VisionStageTimings StageTimings);
