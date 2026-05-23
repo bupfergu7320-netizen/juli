@@ -20,6 +20,7 @@ public enum ProductionSetupBlockReason
     CameraCalibrationDistortionMismatch,
     RAxisCenterMissing,
     RAxisCenterCameraMismatch,
+    TemplateImageMissing,
     TemplateCameraCalibrationMissing,
     TemplateCameraCalibrationMismatch,
     TemplateDistortionCalibrationMismatch

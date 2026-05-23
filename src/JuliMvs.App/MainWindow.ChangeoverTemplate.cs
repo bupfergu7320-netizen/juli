@@ -232,18 +232,24 @@ public partial class MainWindow
         }
 
         var parameters = ReadVisionParameters();
-        _templateImagePath = rawImagePath;
-        _template = _visionService.CreateTemplate(
+        var template = _visionService.CreateTemplate(
             _lastCameraImage!,
             _batchSession.BatchNo,
             _batchSession.ProductName,
             parameters,
             rawImagePath);
+        var templateImagePath = _inspectionFileStore.SaveTemplateImage(
+            _lastCameraImage!,
+            template.ProductName,
+            template.BatchNo,
+            template.Id);
+        _templateImagePath = templateImagePath;
+        _template = template with { ImagePath = templateImagePath };
         var selfCheck = new ChangeoverTemplateSelfCheck(_visionService).Validate(
             _lastCameraImage!,
             _template,
             parameters,
-            rawImagePath);
+            templateImagePath);
         if (!selfCheck.Passed)
         {
             throw new InvalidOperationException(selfCheck.Message);
@@ -254,7 +260,7 @@ public partial class MainWindow
                 _template,
                 parameters,
                 selfCheck,
-                rawImagePath));
+                templateImagePath));
 
         await _repository.SaveTemplateAsync(_template);
         await SaveRecipeAsync(_batchSession.ProductName);
@@ -278,7 +284,7 @@ public partial class MainWindow
         SetImage(ResultImage, selfCheckEvidence.DiagnosticImagePath);
         RenderTemplateSummary(_template);
         MessageText.Text = "当前型号标准位/模板已重新建立并保存。点击运行后进入生产检测状态。";
-        Log($"换型标准位/模板建立完成: 型号 {_template.ProductName}, 批次 {_template.BatchNo}, 图像 {rawImagePath}, 自检报告 {selfCheckEvidence.ReportPath}");
+        Log($"换型标准位/模板建立完成: 型号 {_template.ProductName}, 批次 {_template.BatchNo}, 图像 {templateImagePath}, 自检报告 {selfCheckEvidence.ReportPath}");
         UpdateChangeoverFlow(
             activeStep: 5,
             completedSteps: 6,
@@ -292,7 +298,7 @@ public partial class MainWindow
                 $"宽度: {_template.WidthMm:F3}mm\n" +
                 $"高度: {_template.HeightMm:F3}mm\n" +
                 $"面积: {_template.AreaPixels:F0}px\n" +
-                $"图像: {rawImagePath}\n" +
+                $"图像: {templateImagePath}\n" +
                 $"自检诊断图: {selfCheckEvidence.DiagnosticImagePath}\n" +
                 $"自检报告: {selfCheckEvidence.ReportPath}");
 
@@ -316,7 +322,7 @@ public partial class MainWindow
                 _template.HeightMm,
                 _template.AreaPixels,
                 _template.MatchScoreBaseline),
-            rawImagePath,
+            templateImagePath,
             selfCheckEvidence.DiagnosticImagePath);
         _lastInspectionResult = templateResult;
     }

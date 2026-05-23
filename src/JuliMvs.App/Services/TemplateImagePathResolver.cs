@@ -40,9 +40,13 @@ internal sealed class TemplateImagePathResolver
         }
 
         var candidatePath = Path.Combine(_baseDirectory, "Data", dataRelativePath);
-        return File.Exists(candidatePath)
-            ? candidatePath
-            : imagePath;
+        if (File.Exists(candidatePath))
+        {
+            return candidatePath;
+        }
+
+        var migratedTemplatePath = TryFindMigratedTemplatePath(imagePath);
+        return migratedTemplatePath ?? imagePath;
     }
 
     private static string? TryGetDataRelativePath(string imagePath)
@@ -59,5 +63,25 @@ internal sealed class TemplateImagePathResolver
         }
 
         return null;
+    }
+
+    private string? TryFindMigratedTemplatePath(string imagePath)
+    {
+        var fileName = Path.GetFileName(imagePath);
+        if (string.IsNullOrWhiteSpace(fileName))
+        {
+            return null;
+        }
+
+        var templatesDirectory = Path.Combine(_baseDirectory, "Data", "Templates");
+        if (!Directory.Exists(templatesDirectory))
+        {
+            return null;
+        }
+
+        return Directory
+            .EnumerateFiles(templatesDirectory, fileName, SearchOption.AllDirectories)
+            .OrderByDescending(File.GetLastWriteTimeUtc)
+            .FirstOrDefault();
     }
 }

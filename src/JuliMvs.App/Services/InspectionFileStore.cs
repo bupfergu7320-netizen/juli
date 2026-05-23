@@ -29,4 +29,29 @@ internal sealed class InspectionFileStore
         Cv2.ImWrite(path, image);
         return path;
     }
+
+    public string SaveTemplateImage(Mat image, string productName, string batchNo, Guid templateId)
+    {
+        var directory = Path.Combine(
+            _baseDirectory,
+            "Data",
+            "Templates",
+            SanitizePathSegment(productName),
+            SanitizePathSegment(batchNo));
+        Directory.CreateDirectory(directory);
+
+        var path = Path.Combine(directory, $"{DateTime.Now:yyyyMMddHHmmssfff}-{templateId:N}.bmp");
+        Cv2.ImWrite(path, image);
+        return path;
+    }
+
+    private static string SanitizePathSegment(string value)
+    {
+        var invalidChars = Path.GetInvalidFileNameChars();
+        var chars = value
+            .Select(ch => invalidChars.Contains(ch) ? '_' : ch)
+            .ToArray();
+        var sanitized = new string(chars).Trim();
+        return string.IsNullOrWhiteSpace(sanitized) ? "template" : sanitized;
+    }
 }

@@ -8,8 +8,10 @@ using OpenCvSharp;
 using System.Text.Json;
 
 VerifyOldPublishedDataPathResolvesUnderCurrentBaseDirectory();
+VerifyMigratedTemplatePathResolvesFromTemplatesDirectory();
 VerifyExistingPathIsPreserved();
 VerifyUnmatchedMissingPathIsPreserved();
+VerifyMissingTemplateImageBlocksProductionSetup();
 VerifyLocalSettingsKeepsCurrentProductName();
 VerifyLegacyLocalSettingsDefaultsCurrentProductName();
 VerifyProductionOkDoesNotSaveImages();
@@ -47,6 +49,33 @@ static void VerifyOldPublishedDataPathResolvesUnderCurrentBaseDirectory()
     AssertEqual(currentTemplatePath, resolved, "old published Data path");
 }
 
+static void VerifyMigratedTemplatePathResolvesFromTemplatesDirectory()
+{
+    var testRoot = CreateTempDirectory();
+    var oldTemplatePath = Path.Combine(
+        testRoot,
+        "JuliMvs_App_20260520_155148",
+        "Data",
+        "Camera",
+        "20260520",
+        "camera-160941629.bmp");
+    var stableTemplatePath = Path.Combine(
+        testRoot,
+        "JuliMvs_App_20260520_165347",
+        "Data",
+        "Templates",
+        "PART-A",
+        "BATCH-1",
+        "camera-160941629.bmp");
+    Directory.CreateDirectory(Path.GetDirectoryName(stableTemplatePath)!);
+    File.WriteAllText(stableTemplatePath, "template image placeholder");
+
+    var resolver = new TemplateImagePathResolver(Path.Combine(testRoot, "JuliMvs_App_20260520_165347"));
+    var resolved = resolver.ResolvePath(oldTemplatePath);
+
+    AssertEqual(stableTemplatePath, resolved, "migrated template path");
+}
+
 static void VerifyExistingPathIsPreserved()
 {
     var testRoot = CreateTempDirectory();
@@ -69,6 +98,48 @@ static void VerifyUnmatchedMissingPathIsPreserved()
     var resolved = resolver.ResolvePath(missingPath);
 
     AssertEqual(missingPath, resolved, "unmatched missing path");
+}
+
+static void VerifyMissingTemplateImageBlocksProductionSetup()
+{
+    var parameters = VisionParameters.Default with
+    {
+        CameraCalibration = new CameraCalibration
+        {
+            Enabled = true,
+            CalibrationId = "camera-1",
+            SourceDistortionCalibrationId = string.Empty
+        },
+        RAxisCenterCalibration = new RAxisCenterCalibration
+        {
+            Enabled = true,
+            SourceCameraCalibrationId = "camera-1"
+        }
+    };
+    var template = new PartTemplate(
+        Guid.NewGuid(),
+        "BATCH-1",
+        "PART-A",
+        Path.Combine(CreateTempDirectory(), "missing-template.bmp"),
+        DateTimeOffset.Now,
+        100,
+        100,
+        0,
+        0,
+        "camera-1",
+        string.Empty,
+        0,
+        10,
+        10,
+        100,
+        1,
+        ImageRoi.Empty,
+        parameters);
+
+    var setup = OpenCvVisionService.ValidateProductionSetup(template, parameters);
+
+    AssertBoolEqual(false, setup.IsReady, "missing template image setup ready");
+    AssertEqual(ProductionSetupBlockReason.TemplateImageMissing.ToString(), setup.Reason.ToString(), "missing template image reason");
 }
 
 static void VerifyLocalSettingsKeepsCurrentProductName()

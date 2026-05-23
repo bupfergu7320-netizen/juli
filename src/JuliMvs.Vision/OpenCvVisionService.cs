@@ -2779,6 +2779,11 @@ public sealed class OpenCvVisionService
 
     private static ProductionSetupDecision ValidateTemplateCalibration(PartTemplate template, VisionParameters parameters)
     {
+        if (string.IsNullOrWhiteSpace(template.ImagePath) || !File.Exists(template.ImagePath))
+        {
+            return ProductionSetupDecision.Blocked(ProductionSetupBlockReason.TemplateImageMissing);
+        }
+
         if (string.IsNullOrWhiteSpace(template.SourceCameraCalibrationId))
         {
             return ProductionSetupDecision.Blocked(ProductionSetupBlockReason.TemplateCameraCalibrationMissing);
@@ -2831,6 +2836,8 @@ public sealed class OpenCvVisionService
                 "R-axis center calibration is missing.",
             ProductionSetupBlockReason.RAxisCenterCameraMismatch =>
                 "R-axis center calibration does not match the current camera calibration.",
+            ProductionSetupBlockReason.TemplateImageMissing =>
+                "Template image is missing.",
             ProductionSetupBlockReason.TemplateCameraCalibrationMissing =>
                 "Template camera calibration source is missing.",
             ProductionSetupBlockReason.TemplateCameraCalibrationMismatch =>
