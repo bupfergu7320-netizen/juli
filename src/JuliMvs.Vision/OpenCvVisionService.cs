@@ -251,7 +251,12 @@ public sealed class OpenCvVisionService
 
         var referenceCenter = GetReferenceCenterMachine(template, activeParameters);
         var currentCenter = activeParameters.CameraCalibration.PixelToMachine(detection.CenterXPixel, detection.CenterYPixel);
-        var resolvedAngle = ResolveInspectionAngle(workingImage, detection, template, activeParameters);
+        var resolvedAngle = ResolveInspectionAngle(
+            workingImage,
+            detection,
+            template,
+            activeParameters,
+            buildDiagnostics: buildDiagnosticImage);
         var angleDiagnostic = BuildAngleDiagnostic(activeParameters, detection.AngleDegrees, resolvedAngle);
         var similarity = CalculateTemplateSimilarity(
             workingImage,
@@ -287,6 +292,7 @@ public sealed class OpenCvVisionService
             detection,
             template,
             activeParameters,
+            buildDiagnostics: buildDiagnosticImage,
             ref decision,
             ref reason,
             ref message);
@@ -549,6 +555,7 @@ public sealed class OpenCvVisionService
         PartDetection detection,
         PartTemplate template,
         VisionParameters parameters,
+        bool buildDiagnostics,
         ref InspectionDecision decision,
         ref NgReason reason,
         ref string message)
@@ -564,7 +571,6 @@ public sealed class OpenCvVisionService
             return null;
         }
 
-        var diagnostic = ToContourMirrorFaceDebugResult(computation);
         if (IsBackSideNg(computation, parameters))
         {
             decision = InspectionDecision.Ng;
@@ -574,7 +580,9 @@ public sealed class OpenCvVisionService
                 $"front={computation.FrontScore:F3}, back={computation.BackScore:F3}.";
         }
 
-        return diagnostic;
+        return buildDiagnostics
+            ? ToContourMirrorFaceDebugResult(computation)
+            : null;
     }
 
     private static bool IsBackSideNg(
@@ -966,11 +974,12 @@ public sealed class OpenCvVisionService
         Mat preparedImage,
         PartDetection detection,
         PartTemplate template,
-        VisionParameters parameters)
+        VisionParameters parameters,
+        bool buildDiagnostics = true)
     {
         if (parameters.AngleDetectionMode == AngleDetectionMode.AutoPcaOrPolarRing)
         {
-            return ResolveAutoPcaOrPolarRingAngle(preparedImage, detection, template, parameters);
+            return ResolveAutoPcaOrPolarRingAngle(preparedImage, detection, template, parameters, buildDiagnostics);
         }
 
         if (parameters.AngleDetectionMode == AngleDetectionMode.OuterContour)
@@ -1002,7 +1011,7 @@ public sealed class OpenCvVisionService
             var autoModel = TryGetAutoFeatureAngleModel(template, parameters);
             if (autoModel is { Features.Count: > 0 })
             {
-                return MatchAutoFeatureRotation(preparedImage, detection, autoModel, template.ReferenceAngleDegrees, parameters);
+                return MatchAutoFeatureRotation(preparedImage, detection, autoModel, template.ReferenceAngleDegrees, parameters, buildDiagnostics);
             }
 
             return new ResolvedAngle(
@@ -1032,7 +1041,7 @@ public sealed class OpenCvVisionService
             var polarModel = TryGetPolarRingAngleModel(template, parameters);
             if (polarModel is not null)
             {
-                return MatchPolarRingRotation(preparedImage, detection, polarModel, template.ReferenceAngleDegrees, parameters);
+                return MatchPolarRingRotation(preparedImage, detection, polarModel, template.ReferenceAngleDegrees, parameters, buildDiagnostics);
             }
 
             return new ResolvedAngle(
@@ -1060,14 +1069,15 @@ public sealed class OpenCvVisionService
                 Candidates: null);
         }
 
-        return MatchTemplateRotation(preparedImage, detection, model, template.ReferenceAngleDegrees, parameters);
+        return MatchTemplateRotation(preparedImage, detection, model, template.ReferenceAngleDegrees, parameters, buildDiagnostics);
     }
 
     private ResolvedAngle ResolveAutoPcaOrPolarRingAngle(
         Mat preparedImage,
         PartDetection detection,
         PartTemplate template,
-        VisionParameters parameters)
+        VisionParameters parameters,
+        bool buildDiagnostics)
     {
         var profile = CalculateContourAngleProfile(detection);
         var profileDetail = FormatContourAngleProfile(profile);
@@ -1081,7 +1091,8 @@ public sealed class OpenCvVisionService
                     templateContourModel,
                     template.ReferenceAngleDegrees,
                     parameters,
-                    profileDetail);
+                    profileDetail,
+                    buildDiagnostics);
             }
 
             return new ResolvedAngle(
@@ -1098,13 +1109,13 @@ public sealed class OpenCvVisionService
         var contourModel = TryGetContourPolarAngleModel(template, parameters);
         if (contourModel is not null)
         {
-            return MatchContourPolarRotation(detection, contourModel, template.ReferenceAngleDegrees, parameters, profileDetail);
+            return MatchContourPolarRotation(detection, contourModel, template.ReferenceAngleDegrees, parameters, profileDetail, buildDiagnostics);
         }
 
         var polarModel = TryGetPolarRingAngleModel(template, parameters);
         if (polarModel is not null)
         {
-            var polarResult = MatchPolarRingRotation(preparedImage, detection, polarModel, template.ReferenceAngleDegrees, parameters);
+            var polarResult = MatchPolarRingRotation(preparedImage, detection, polarModel, template.ReferenceAngleDegrees, parameters, buildDiagnostics);
             return polarResult with
             {
                 Source = polarResult.Source == "polar-ring-rotation"
@@ -1538,7 +1549,8 @@ public sealed class OpenCvVisionService
         PartDetection detection,
         TemplateAngleModel model,
         double referenceAngleDegrees,
-        VisionParameters parameters)
+        VisionParameters parameters,
+        bool buildDiagnostics)
     {
         using var searchPatch = ExtractSearchAnglePatch(
             preparedImage,
@@ -1552,7 +1564,9 @@ public sealed class OpenCvVisionService
         var fineStart = coarse.AngleDegrees - TemplateAngleRefineWindowDegrees;
         var fineEnd = coarse.AngleDegrees + TemplateAngleRefineWindowDegrees;
         var fine = SearchTemplateAngle(searchPatch, model.Patch, fineStart, fineEnd, fineStep);
-        var candidates = BuildAngleCandidates(referenceAngleDegrees, fine.TopCandidates, coarse.TopCandidates);
+        var candidates = buildDiagnostics
+            ? BuildAngleCandidates(referenceAngleDegrees, fine.TopCandidates, coarse.TopCandidates)
+            : null;
 
         return new ResolvedAngle(
             AngleMath.NormalizeDegrees360(referenceAngleDegrees + fine.AngleDegrees),
@@ -1569,7 +1583,8 @@ public sealed class OpenCvVisionService
         PartDetection detection,
         PolarRingAngleModel model,
         double referenceAngleDegrees,
-        VisionParameters parameters)
+        VisionParameters parameters,
+        bool buildDiagnostics)
     {
         using var gray = ToGray(preparedImage);
         var currentSignature = BuildPolarRingSignature(gray, detection.CenterXPixel, detection.CenterYPixel, model.RadiusPixels);
@@ -1590,7 +1605,8 @@ public sealed class OpenCvVisionService
             currentSignature,
             model.Signature,
             referenceAngleDegrees,
-            parameters.TemplateAngleSearchRangeDegrees);
+            parameters.TemplateAngleSearchRangeDegrees,
+            buildDiagnostics);
 
         return new ResolvedAngle(
             AngleMath.NormalizeDegrees360(referenceAngleDegrees + result.AngleOffsetDegrees),
@@ -1607,7 +1623,8 @@ public sealed class OpenCvVisionService
         ContourPolarAngleModel model,
         double referenceAngleDegrees,
         VisionParameters parameters,
-        string profileDetail)
+        string profileDetail,
+        bool buildDiagnostics)
     {
         var currentSignature = BuildContourPolarSignature(detection);
         var currentSignal = CalculateSignatureSignal(currentSignature);
@@ -1628,7 +1645,8 @@ public sealed class OpenCvVisionService
             currentSignature,
             model.Signature,
             referenceAngleDegrees,
-            parameters.TemplateAngleSearchRangeDegrees);
+            parameters.TemplateAngleSearchRangeDegrees,
+            buildDiagnostics);
 
         return new ResolvedAngle(
             AngleMath.NormalizeDegrees360(referenceAngleDegrees + result.AngleOffsetDegrees),
@@ -1646,7 +1664,8 @@ public sealed class OpenCvVisionService
         PartDetection detection,
         AutoFeatureAngleModel model,
         double referenceAngleDegrees,
-        VisionParameters parameters)
+        VisionParameters parameters,
+        bool buildDiagnostics)
     {
         var coarseStep = NormalizeAngleStep(parameters.TemplateAngleCoarseStepDegrees, 5.0);
         var fineStep = NormalizeAngleStep(parameters.TemplateAngleFineStepDegrees, 0.5);
@@ -1708,23 +1727,25 @@ public sealed class OpenCvVisionService
             .Select(CalculateAutoFeatureClusterConfidence)
             .DefaultIfEmpty(0.0)
             .Max();
-        var candidates = votes
-            .SelectMany(vote => vote.Candidates.Select(candidate => new
-            {
-                vote.FeatureIndex,
-                candidate.AngleDegrees,
-                ResolvedAngleDegrees = AngleMath.NormalizeDegrees360(referenceAngleDegrees + candidate.AngleDegrees),
-                candidate.Score
-            }))
-            .OrderByDescending(candidate => candidate.Score)
-            .Take(8)
-            .Select((vote, index) => new AngleCandidateDiagnostic(
-                index + 1,
-                vote.AngleDegrees,
-                vote.ResolvedAngleDegrees,
-                Math.Clamp(vote.Score, 0.0, 1.0),
-                $"auto-feature-{vote.FeatureIndex}"))
-            .ToArray();
+        var candidates = buildDiagnostics
+            ? votes
+                .SelectMany(vote => vote.Candidates.Select(candidate => new
+                {
+                    vote.FeatureIndex,
+                    candidate.AngleDegrees,
+                    ResolvedAngleDegrees = AngleMath.NormalizeDegrees360(referenceAngleDegrees + candidate.AngleDegrees),
+                    candidate.Score
+                }))
+                .OrderByDescending(candidate => candidate.Score)
+                .Take(8)
+                .Select((vote, index) => new AngleCandidateDiagnostic(
+                    index + 1,
+                    vote.AngleDegrees,
+                    vote.ResolvedAngleDegrees,
+                    Math.Clamp(vote.Score, 0.0, 1.0),
+                    $"auto-feature-{vote.FeatureIndex}"))
+                .ToArray()
+            : null;
 
         return new ResolvedAngle(
             bestCluster.ResolvedAngleDegrees,
@@ -2027,7 +2048,8 @@ public sealed class OpenCvVisionService
         float[] currentSignature,
         float[] templateSignature,
         double referenceAngleDegrees,
-        double configuredSearchRangeDegrees)
+        double configuredSearchRangeDegrees,
+        bool buildDiagnostics = true)
     {
         var sampleCount = Math.Min(currentSignature.Length, templateSignature.Length);
         if (sampleCount == 0)
@@ -2066,16 +2088,18 @@ public sealed class OpenCvVisionService
             .Select(candidate => candidate.Score)
             .DefaultIfEmpty(0.0)
             .Max();
-        var diagnostics = candidates
-            .OrderByDescending(candidate => candidate.Score)
-            .Take(8)
-            .Select((candidate, index) => new AngleCandidateDiagnostic(
-                index + 1,
-                candidate.AngleDegrees,
-                AngleMath.NormalizeDegrees360(referenceAngleDegrees + candidate.AngleDegrees),
-                Math.Clamp(candidate.Score, 0.0, 1.0),
-                "polar-ring"))
-            .ToArray();
+        var diagnostics = buildDiagnostics
+            ? candidates
+                .OrderByDescending(candidate => candidate.Score)
+                .Take(8)
+                .Select((candidate, index) => new AngleCandidateDiagnostic(
+                    index + 1,
+                    candidate.AngleDegrees,
+                    AngleMath.NormalizeDegrees360(referenceAngleDegrees + candidate.AngleDegrees),
+                    Math.Clamp(candidate.Score, 0.0, 1.0),
+                    "polar-ring"))
+                .ToArray()
+            : Array.Empty<AngleCandidateDiagnostic>();
 
         return (
             bestAngle,
