@@ -48,7 +48,7 @@ public partial class MainWindow
 
             Log("开始相机拍照检测");
             var captureStopwatch = Stopwatch.StartNew();
-            var rawImagePath = await CaptureCameraImageAsync(saveImage: false);
+            var rawImagePath = await CaptureCameraImageAsync(saveImage: false, applyCaptureDelay: false);
             captureStopwatch.Stop();
             captureElapsedMilliseconds = captureStopwatch.ElapsedMilliseconds;
             await InspectAndPersistAsync(
@@ -247,7 +247,8 @@ public partial class MainWindow
             _plcIpAddress,
             _plcPort,
             GetEffectivePlcOutputTransform(),
-            BuildDiagnosticImage: !writeToPlc));
+            BuildDiagnosticImage: !writeToPlc,
+            SaveInspectionReport: !writeToPlc));
         inspectionStopwatch.Stop();
 
         var result = run.Result;
@@ -338,7 +339,10 @@ public partial class MainWindow
                 GetEffectivePlcOutputTransform(),
                 InspectionDiagnosticMessageFormatter.FormatPlcOutputTransform(GetEffectivePlcOutputTransform()),
                 Log);
-            SavePassivePlcVerificationReport(result, outcome);
+            if (result.Decision != InspectionDecision.Ok)
+            {
+                SavePassivePlcVerificationReport(result, outcome);
+            }
             if (outcome.TriggerCleared)
             {
                 _plcTriggerGate.MarkTriggerCleared();

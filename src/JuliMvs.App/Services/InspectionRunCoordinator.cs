@@ -81,24 +81,29 @@ internal sealed class InspectionRunCoordinator
         string? reportPath = null;
         string? reportError = null;
         var reportStopwatch = Stopwatch.StartNew();
-        try
+        var shouldSaveInspectionReport = request.SaveInspectionReport ||
+            output.Result.Decision != InspectionDecision.Ok;
+        if (shouldSaveInspectionReport)
         {
-            reportPath = _reportWriter.SaveInspectionReport(new InspectionReportContext(
-                result,
-                request.Template,
-                request.Parameters,
-                output,
-                request.TriggerSource,
-                request.WriteToPlc,
-                request.PlcConnected,
-                request.PlcHost,
-                request.PlcPort,
-                request.PlcOutputTransform,
-                request.FrontBackDebug));
-        }
-        catch (Exception ex)
-        {
-            reportError = ex.Message;
+            try
+            {
+                reportPath = _reportWriter.SaveInspectionReport(new InspectionReportContext(
+                    result,
+                    request.Template,
+                    request.Parameters,
+                    output,
+                    request.TriggerSource,
+                    request.WriteToPlc,
+                    request.PlcConnected,
+                    request.PlcHost,
+                    request.PlcPort,
+                    request.PlcOutputTransform,
+                    request.FrontBackDebug));
+            }
+            catch (Exception ex)
+            {
+                reportError = ex.Message;
+            }
         }
         reportStopwatch.Stop();
 
@@ -131,7 +136,8 @@ internal sealed record InspectionRunRequest(
     int PlcPort,
     PlcOutputTransform PlcOutputTransform,
     FrontBackDebugResult? FrontBackDebug = null,
-    bool BuildDiagnosticImage = true);
+    bool BuildDiagnosticImage = true,
+    bool SaveInspectionReport = true);
 
 internal sealed record InspectionRunResult(
     InspectionResult Result,
