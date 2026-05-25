@@ -288,7 +288,7 @@ public partial class MainWindow
             var items = templates
                 .Select(template => new TemplateSelectionItem(
                     template.ProductName,
-                    $"{template.ProductName}  {template.CreatedAt:yyyy-MM-dd HH:mm}  R={template.ReferenceAngleDegrees:F2}"))
+                    FormatTemplateSelectionText(template)))
                 .ToList();
             _changeoverTemplateSelector.ItemsSource = items;
             var current = _currentProductName.Trim();
@@ -306,6 +306,11 @@ public partial class MainWindow
     }
 
     private sealed record TemplateSelectionItem(string ProductName, string DisplayText);
+
+    internal static string FormatTemplateSelectionText(PartTemplate template)
+    {
+        return $"{template.ProductName}  {template.CreatedAt:yyyy-MM-dd HH:mm}";
+    }
 
     private void CancelChangeover()
     {

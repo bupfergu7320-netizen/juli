@@ -28,6 +28,7 @@ VerifyPlcOutputDirectionSettingsApplySimpleXySigns();
 VerifyDirectionFormatterShowsXySigns();
 VerifyProductTemplateNameIsUniqueAndRebuildOverwrites();
 VerifyLegacyDuplicateProductTemplatesKeepNewest();
+VerifyTemplateSelectionTextShowsOnlyNameAndTime();
 VerifyCalibrationBoardDetectionPrefersLowestRmsGrid();
 
 Console.WriteLine("App services keep template images portable, local settings backward-compatible, production image saving limited, and calibration clearing safe.");
@@ -495,6 +496,20 @@ static void VerifyLegacyDuplicateProductTemplatesKeepNewest()
     AssertEqual("BATCH-NEW", loaded?.BatchNo ?? string.Empty, "legacy duplicate newest batch");
     AssertDoubleEqual(22.0, loaded?.ReferenceCenterXMm ?? 0.0, "legacy duplicate newest value");
     AssertEqual(1.ToString(), all.Count.ToString(), "legacy duplicate unique count");
+}
+
+static void VerifyTemplateSelectionTextShowsOnlyNameAndTime()
+{
+    var template = CreateTemplate(
+        "PART-A",
+        "BATCH-1",
+        DateTimeOffset.Parse("2026-05-25T13:44:00+08:00"),
+        49.76);
+
+    var text = JuliMvs.App.MainWindow.FormatTemplateSelectionText(template);
+
+    AssertEqual("PART-A  2026-05-25 13:44", text, "template selection text");
+    AssertBoolEqual(text.Contains("R=", StringComparison.Ordinal), false, "template selection hides R");
 }
 
 static PartTemplate CreateTemplate(
