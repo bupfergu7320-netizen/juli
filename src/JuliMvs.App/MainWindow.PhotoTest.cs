@@ -1,5 +1,3 @@
-using System.Globalization;
-using System.IO;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
@@ -188,12 +186,6 @@ public partial class MainWindow
         }
 
         var activeParameters = ReadVisionParameters();
-        var fixedOverlayPath = CreateFrontBackOverlayDiagnosticPath();
-        var frontBackDebug = _visionService.AnalyzeFrontBackDebug(
-            _lastCameraImage!,
-            _template!,
-            activeParameters,
-            fixedOverlayPath);
         var run = await _inspectionRunCoordinator.RunAsync(new InspectionRunRequest(
             _lastCameraImage!,
             rawImagePath,
@@ -204,8 +196,7 @@ public partial class MainWindow
             _plcClient?.IsConnected == true,
             _plcIpAddress,
             _plcPort,
-            GetEffectivePlcOutputTransform(),
-            frontBackDebug));
+            GetEffectivePlcOutputTransform()));
 
         foreach (var log in run.Logs)
         {
@@ -214,21 +205,6 @@ public partial class MainWindow
 
         _lastInspectionResult = run.Result;
         return new PhotoTestCaptureResult(rawImagePath, null, run);
-    }
-
-    private static string CreateFrontBackOverlayDiagnosticPath()
-    {
-        var now = DateTimeOffset.Now;
-        var directory = Path.Combine(
-            AppContext.BaseDirectory,
-            "Data",
-            "Diagnostics",
-            "FrontBackOverlay",
-            now.ToString("yyyyMMdd", CultureInfo.InvariantCulture));
-        Directory.CreateDirectory(directory);
-        return Path.Combine(
-            directory,
-            $"{now:HHmmssfff}-fixed-overlay.png");
     }
 
     private string BuildPhotoTestInitialText()
@@ -293,7 +269,6 @@ public partial class MainWindow
         var alignment = output.AlignmentSnapshot;
         var angle = output.AngleDiagnostic;
         var similarity = output.TemplateSimilarity;
-        var frontBackDebug = run.FrontBackDebug;
         var plcOutput = measurement is null
             ? new PlcOutputCommand(0, 0, 0)
             : PlcOutputDiagnosticFormatter.CalculatePlcOutputCommand(measurement, GetEffectivePlcOutputTransform());
@@ -478,106 +453,28 @@ public partial class MainWindow
 
         text.AddRange([
             string.Empty,
-            "正反面调试",
-            "------------------------------",
-            "状态: 只显示，不参与NG，不写PLC"
+            "正反面判定",
+            "------------------------------"
         ]);
-        if (frontBackDebug is null)
+        if (!_visionParameters.BackSideNgEnabled)
         {
-            text.Add("无正反面调试结果。");
+            text.Add("状态: 未启用，此工件按正反面对称件处理。");
+        }
+        else if (output.ContourSampleMirrorDecisionDiagnostic is { } mirror)
+        {
+            text.Add("规则: 外轮廓半径序列 + 镜像模板全角度匹配；旧人工凸起点不参与NG。");
+            text.Add($"结果: {FormatFrontBackDecision(mirror.SuggestedDecision)}");
+            text.Add($"正面误差: {mirror.FrontScore:F2}px");
+            text.Add($"镜像误差: {mirror.BackScore:F2}px");
+            text.Add($"误差差值(镜像-正面): {mirror.ScoreDifference:F2}px, 分离阈值={mirror.MinimumScoreDifference:F2}px");
+            text.Add($"可靠: {(mirror.IsReliable ? "是" : "否")}, 采样点={mirror.SampleCount}");
+            text.Add($"角度: 正面={mirror.FrontAngleOffsetDegrees:F3}deg, 镜像={mirror.BackAngleOffsetDegrees:F3}deg");
+            text.Add($"半径变化: 当前={mirror.CurrentSignal:F2}px, 模板={mirror.TemplateSignal:F2}px");
+            text.Add($"说明: {mirror.Message}");
         }
         else
         {
-            text.Add($"建议: {FormatFrontBackDebugDecision(frontBackDebug.SuggestedDecision)}");
-            text.Add($"可靠: {(frontBackDebug.IsReliable ? "是" : "否")}");
-            text.Add($"正面分数: {frontBackDebug.FrontScore:F3}");
-            text.Add($"反面分数: {frontBackDebug.BackScore:F3}");
-            text.Add($"分差(正面-反面): {frontBackDebug.ScoreDifference:F3}");
-            text.Add($"正面对齐: {frontBackDebug.FrontAlignment}");
-            text.Add($"反面对齐: {frontBackDebug.BackAlignment}");
-            text.Add($"说明: {frontBackDebug.Message}");
-            if (frontBackDebug.SameAngleOverlay is { } sameAngle)
-            {
-                text.Add(string.Empty);
-                text.Add("同角度叠放调试");
-                text.Add("状态: 只显示，不参与NG，不写PLC");
-                text.Add($"建议: {FormatFrontBackDebugDecision(sameAngle.SuggestedDecision)}");
-                text.Add($"可对齐分数: {sameAngle.Score:F3}");
-                text.Add($"Mask IoU: {sameAngle.MaskIoU:F3}");
-                text.Add($"形状分数: {sameAngle.ShapeScore:F3}");
-                text.Add($"边缘距离分数: {sameAngle.EdgeDistanceScore:F3}");
-                text.Add($"尺寸分数: {sameAngle.SizeScore:F3}");
-                text.Add($"对齐方式: {sameAngle.Alignment}");
-                text.Add($"说明: {sameAngle.Message}");
-            }
-            else
-            {
-                text.Add("同角度叠放调试: 不可用。");
-            }
-            if (frontBackDebug.ContourMirror is { } contourMirror)
-            {
-                text.Add(string.Empty);
-                text.Add("Contour mirror front/back debug");
-                text.Add(_visionParameters.BackSideNgEnabled
-                ? "Status: backside NG enabled; diff(front-back)<0 is NG"
-                : "Status: switch off; display only");
-            text.Add($"Decision: {FormatFrontBackDebugDecision(contourMirror.SuggestedDecision)}");
-                text.Add($"Reliable: {(contourMirror.IsReliable ? "Yes" : "No")}");
-                text.Add($"Front contour score: {contourMirror.FrontScore:F3}");
-                text.Add($"Back mirrored score: {contourMirror.BackScore:F3}");
-                text.Add($"Diff(front-back): {contourMirror.ScoreDifference:F3}");
-                text.Add($"Front angle offset: {contourMirror.FrontAngleOffsetDegrees:F3}deg");
-                text.Add($"Back mirror angle offset: {contourMirror.BackAngleOffsetDegrees:F3}deg");
-                text.Add($"Front alternative score: {contourMirror.FrontAlternativeScore:F3}");
-                text.Add($"Back alternative score: {contourMirror.BackAlternativeScore:F3}");
-                text.Add($"Current contour signal: {contourMirror.CurrentSignal:F3}");
-                text.Add($"Template contour signal: {contourMirror.TemplateSignal:F3}");
-                text.Add($"Search range: {contourMirror.SearchRangeDegrees:F1}deg");
-                text.Add($"Message: {contourMirror.Message}");
-            }
-            else
-            {
-                text.Add("Contour mirror front/back debug: unavailable.");
-            }
-            if (frontBackDebug.FixedAngleOverlay is { } fixedOverlay)
-            {
-                text.Add(string.Empty);
-                text.Add("Fixed overlay front/back debug");
-                text.Add("Status: display only; not NG; not PLC");
-                text.Add($"Diagnostic image: {FormatPathForDisplay(fixedOverlay.DiagnosticImagePath)}");
-                AppendFixedOverlayVariantText(text, fixedOverlay.CenterOnly);
-                AppendFixedOverlayVariantText(text, fixedOverlay.ResolvedAngle);
-                if (fixedOverlay.MirrorAngle is { } mirrorAngle)
-                {
-                    AppendFixedOverlayVariantText(text, mirrorAngle);
-                }
-
-                text.Add($"Message: {fixedOverlay.Message}");
-            }
-            else
-            {
-                text.Add("Fixed overlay front/back debug: unavailable.");
-            }
-            if (frontBackDebug.EdgeRing is { } edgeRing)
-            {
-                text.Add(string.Empty);
-                text.Add("边缘环带调试");
-                text.Add("建议: 仅看边缘对比，不作为正反面依据");
-                text.Add($"可靠: {(edgeRing.IsReliable ? "是" : "否")}");
-                text.Add($"边缘正面分数: {edgeRing.FrontScore:F3}");
-                text.Add($"边缘反面分数: {edgeRing.BackScore:F3}");
-                text.Add($"边缘分差(正面-反面): {edgeRing.ScoreDifference:F3}");
-                text.Add($"稳定边缘比例: {edgeRing.StableSampleRatio:F3}");
-                text.Add($"梯度方向一致性: {edgeRing.GradientDirectionAgreement:F3}");
-                text.Add($"模板边缘对比度: {edgeRing.TemplateEdgeContrast:F3}");
-                text.Add($"当前边缘对比度: {edgeRing.CurrentEdgeContrast:F3}");
-                text.Add($"采样点数: {edgeRing.SampleCount}");
-                text.Add($"说明: {edgeRing.Message}");
-            }
-            else
-            {
-                text.Add("边缘环带调试: 不可用。");
-            }
+            text.Add("状态: 已启用反面NG；当前检测未进入OK后判定。");
         }
 
         if (alignment is not null)
@@ -603,74 +500,26 @@ public partial class MainWindow
         return string.Join(Environment.NewLine, text);
     }
 
-    private static void AppendFixedOverlayVariantText(
-        List<string> text,
-        FixedAngleOverlayVariantDebugResult variant)
-    {
-        text.Add(
-            $"{variant.Name}: Score={variant.Score:F3}, IoU={variant.MaskIoU:F3}, " +
-            $"Mismatch={variant.MismatchRatio:F3}, TemplateOnly={variant.TemplateOnlyRatio:F3}, " +
-            $"CurrentOnly={variant.CurrentOnlyRatio:F3}, CurrentAngle={variant.CurrentAngleDegrees:F3}deg, " +
-            $"TemplateAngle={variant.TemplateAngleDegrees:F3}deg, Alignment={variant.Alignment}");
-    }
-
     private void LogPhotoTestSummary(InspectionRunResult run)
     {
         Log($"拍照测试: {run.Result.Decision}: {run.Result.Message}");
         Log(_inspectionDiagnosticMessageFormatter.BuildCandidateDiagnosticsText(run.Output.CandidateDiagnostics));
         Log(_inspectionDiagnosticMessageFormatter.BuildAngleCandidatesText(run.Output.AngleDiagnostic));
-        if (run.FrontBackDebug is not null)
+        if (_visionParameters.BackSideNgEnabled)
         {
-            Log(
-                "正反面调试(只显示不NG): " +
-                $"建议={FormatFrontBackDebugDecision(run.FrontBackDebug.SuggestedDecision)}, " +
-                $"可靠={(run.FrontBackDebug.IsReliable ? "是" : "否")}, " +
-                $"正面={run.FrontBackDebug.FrontScore:F3}, " +
-                $"反面={run.FrontBackDebug.BackScore:F3}, " +
-                $"分差={run.FrontBackDebug.ScoreDifference:F3}");
-            if (run.FrontBackDebug.SameAngleOverlay is { } sameAngle)
+            if (run.Output.ContourSampleMirrorDecisionDiagnostic is { } mirror)
             {
                 Log(
-                    "同角度叠放调试(只显示不NG): " +
-                    $"建议={FormatFrontBackDebugDecision(sameAngle.SuggestedDecision)}, " +
-                    $"Score={sameAngle.Score:F3}, " +
-                    $"MaskIoU={sameAngle.MaskIoU:F3}, " +
-                    $"Shape={sameAngle.ShapeScore:F3}, " +
-                    $"Edge={sameAngle.EdgeDistanceScore:F3}");
+                    "正反面判定(外轮廓半径镜像): " +
+                    $"Decision={mirror.SuggestedDecision}, " +
+                    $"FrontError={mirror.FrontScore:F2}px, " +
+                    $"MirrorError={mirror.BackScore:F2}px, " +
+                    $"MirrorMinusFront={mirror.ScoreDifference:F2}px, " +
+                    $"SeparationThreshold={mirror.MinimumScoreDifference:F2}px");
             }
-            if (run.FrontBackDebug.ContourMirror is { } contourMirror)
+            else
             {
-                Log(
-                    $"Contour mirror front/back debug({(_visionParameters.BackSideNgEnabled ? "backside NG enabled" : "display only")}): " +
-                    $"Decision={FormatFrontBackDebugDecision(contourMirror.SuggestedDecision)}, " +
-                    $"Reliable={(contourMirror.IsReliable ? "Yes" : "No")}, " +
-                    $"Front={contourMirror.FrontScore:F3}, " +
-                    $"Back={contourMirror.BackScore:F3}, " +
-                    $"Diff={contourMirror.ScoreDifference:F3}({(contourMirror.ScoreDifference < 0.0 ? "NG backside" : "front")}), " +
-                    $"FrontAngle={contourMirror.FrontAngleOffsetDegrees:F3}deg, " +
-                    $"BackAngle={contourMirror.BackAngleOffsetDegrees:F3}deg");
-            }
-            if (run.FrontBackDebug.FixedAngleOverlay is { } fixedOverlay)
-            {
-                Log(
-                    "Fixed overlay front/back debug(display only): " +
-                    $"CenterMismatch={fixedOverlay.CenterOnly.MismatchRatio:F3}, " +
-                    $"ResolvedMismatch={fixedOverlay.ResolvedAngle.MismatchRatio:F3}, " +
-                    $"MirrorMismatch={(fixedOverlay.MirrorAngle is null ? "-" : fixedOverlay.MirrorAngle.MismatchRatio.ToString("F3", CultureInfo.InvariantCulture))}, " +
-                    $"Image={fixedOverlay.DiagnosticImagePath ?? "-"}");
-            }
-            if (run.FrontBackDebug.EdgeRing is { } edgeRing)
-            {
-                Log(
-                    "边缘正反面调试(只显示不NG): " +
-                    "建议=仅看边缘对比, " +
-                    $"可靠={(edgeRing.IsReliable ? "是" : "否")}, " +
-                    $"正面={edgeRing.FrontScore:F3}, " +
-                    $"反面={edgeRing.BackScore:F3}, " +
-                    $"分差={edgeRing.ScoreDifference:F3}, " +
-                    $"稳定边缘比例={edgeRing.StableSampleRatio:F3}, " +
-                    $"模板对比={edgeRing.TemplateEdgeContrast:F3}, " +
-                    $"当前对比={edgeRing.CurrentEdgeContrast:F3}");
+                Log("正反面判定(外轮廓半径镜像): 未执行；当前检测未进入OK后判定。");
             }
         }
         LogPlcOutputPreview(run.Result, run.Output.AlignmentSnapshot);
@@ -694,14 +543,15 @@ public partial class MainWindow
         return PlcOutputDiagnosticFormatter.FormatPlcValueText(value);
     }
 
-    private static string FormatFrontBackDebugDecision(FrontBackDebugDecision decision)
+    private static string FormatFrontBackDecision(FrontBackDebugDecision decision)
     {
         return decision switch
         {
             FrontBackDebugDecision.Front => "正面",
-            FrontBackDebugDecision.Back => "反面",
-            FrontBackDebugDecision.Uncertain => "不确定",
+            FrontBackDebugDecision.Back => "反面NG",
+            FrontBackDebugDecision.Uncertain => "不确定，按NG处理",
             _ => "不可用"
         };
     }
+
 }

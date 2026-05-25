@@ -96,6 +96,11 @@ public sealed class MitsubishiModbusTcpPlcClient : IPlcClient
         return WriteSingleRegisterAsync(_options.TriggerAddress, 0, cancellationToken);
     }
 
+    public Task ClearResultCodeAsync(CancellationToken cancellationToken = default)
+    {
+        return WriteSingleRegisterAsync(_options.ResultAddress, 0, cancellationToken);
+    }
+
     public async Task<PlcOutputReadback> ReadOutputReadbackAsync(CancellationToken cancellationToken = default)
     {
         var triggerRegisters = await ReadHoldingRegistersAsync(_options.TriggerAddress, 1, cancellationToken);
@@ -233,9 +238,7 @@ public sealed class MitsubishiModbusTcpPlcClient : IPlcClient
         var y = RoundDeviationForPlc(output.YDeviation);
         var r = RoundDeviationForPlc(output.RDeviation);
 
-        await WriteFloatAsync(_options.XCompensationAddress, x, cancellationToken);
-        await WriteFloatAsync(_options.YCompensationAddress, y, cancellationToken);
-        await WriteFloatAsync(_options.RCompensationAddress, r, cancellationToken);
+        await WriteDeviationOutputAsync(x, y, r, cancellationToken);
         await WriteSingleRegisterAsync(_options.ResultAddress, 1, cancellationToken);
 
         return new PlcOutputCommand(x, y, r);
@@ -243,9 +246,29 @@ public sealed class MitsubishiModbusTcpPlcClient : IPlcClient
 
     private async Task WriteZeroDeviationOutputAsync(CancellationToken cancellationToken)
     {
-        await WriteFloatAsync(_options.XCompensationAddress, 0.0f, cancellationToken);
-        await WriteFloatAsync(_options.YCompensationAddress, 0.0f, cancellationToken);
-        await WriteFloatAsync(_options.RCompensationAddress, 0.0f, cancellationToken);
+        await WriteDeviationOutputAsync(0.0f, 0.0f, 0.0f, cancellationToken);
+    }
+
+    private async Task WriteDeviationOutputAsync(
+        float x,
+        float y,
+        float r,
+        CancellationToken cancellationToken)
+    {
+        if (_options.YCompensationAddress == _options.XCompensationAddress + 2 &&
+            _options.RCompensationAddress == _options.XCompensationAddress + 4)
+        {
+            var registers = FloatToRegisters(x, _options.SwapFloatWords)
+                .Concat(FloatToRegisters(y, _options.SwapFloatWords))
+                .Concat(FloatToRegisters(r, _options.SwapFloatWords))
+                .ToArray();
+            await WriteMultipleRegistersAsync(_options.XCompensationAddress, registers, cancellationToken);
+            return;
+        }
+
+        await WriteFloatAsync(_options.XCompensationAddress, x, cancellationToken);
+        await WriteFloatAsync(_options.YCompensationAddress, y, cancellationToken);
+        await WriteFloatAsync(_options.RCompensationAddress, r, cancellationToken);
     }
 
     private Task WriteFloatAsync(
@@ -270,14 +293,14 @@ public sealed class MitsubishiModbusTcpPlcClient : IPlcClient
         var response = await SendRequestAsync(pdu, cancellationToken);
         if (response.Length != 5 || response[0] != WriteSingleRegisterFunction)
         {
-            throw new InvalidOperationException("PLC鍐欏崟涓繚鎸佸瘎瀛樺櫒鍝嶅簲鏍煎紡閿欒銆?");
+            throw new InvalidOperationException("PLC写单个保持寄存器响应格式错误。");
         }
 
         var responseAddress = BinaryPrimitives.ReadUInt16BigEndian(response.AsSpan(1, 2));
         var responseValue = BinaryPrimitives.ReadUInt16BigEndian(response.AsSpan(3, 2));
         if (responseAddress != CheckedAddress(address) || responseValue != value)
         {
-            throw new InvalidOperationException("PLC鍐欏崟涓繚鎸佸瘎瀛樺櫒鍝嶅簲鍦板潃鎴栨暟鍊间笉鍖归厤銆?");
+            throw new InvalidOperationException("PLC写单个保持寄存器响应地址或数值不匹配。");
         }
     }
 
@@ -466,7 +489,7 @@ public sealed class MitsubishiModbusTcpPlcClient : IPlcClient
     {
         if (quantity is < 0 or > 125)
         {
-            throw new ArgumentOutOfRangeException(nameof(quantity), "Modbus holding register read quantity must be between 0 and 125.");
+            throw new ArgumentOutOfRangeException(nameof(quantity), "Modbus保持寄存器读取数量必须在0到125之间。");
         }
 
         return (ushort)quantity;

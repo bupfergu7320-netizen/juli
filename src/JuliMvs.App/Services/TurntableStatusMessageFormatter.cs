@@ -14,17 +14,15 @@ internal static class TurntableStatusMessageFormatter
         var rCommandDirectionText = visionParameters.InvertRotationCompensation
             ? "R\u65b9\u5411=\u53d6\u53cd\u5e76\u540c\u6b65\u91cd\u7b97XY"
             : "R\u65b9\u5411=\u4e0d\u53d6\u53cd";
-        var backSideNgText = visionParameters.BackSideNgEnabled
-            ? "\u53cd\u9762NG=\u5df2\u542f\u7528"
-            : "\u53cd\u9762NG=\u672a\u542f\u7528";
+        var xyDirectionText = PlcOutputDirectionSettings.FormatSimpleDirectionText(outputTransform);
         return
             "PLC\u7edd\u5bf9\u5b9a\u4f4d\u5408\u540c: TargetX=BaseX+D1002, TargetY=BaseY+D1004, TargetR=BaseR+D1006" +
             Environment.NewLine +
             "PLC\u8f93\u51faR\u8f74\u4e2d\u5fc3\u540e\u6700\u7ec8\u7ea0\u504f\u91cf: D1002=HomeXAction, D1004=HomeYAction, D1006=HomeRAction; D1002/D1004\u6309PLC\u6700\u7ec8R\u547d\u4ee4\u540c\u6b65\u91cd\u7b97XY\u8865\u507f" +
             Environment.NewLine +
-            rCommandDirectionText +
+            xyDirectionText +
             Environment.NewLine +
-            backSideNgText +
+            rCommandDirectionText +
             Environment.NewLine +
             $"PLC\u6700\u7ec8\u7ea0\u504f\u8f93\u51fa: {InspectionDiagnosticMessageFormatter.FormatPlcOutputTransform(outputTransform)}";
     }

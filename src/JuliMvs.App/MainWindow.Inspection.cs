@@ -47,6 +47,8 @@ public partial class MainWindow
             }
 
             Log("开始相机拍照检测");
+            await ClearPlcResultCodeBeforeCaptureAsync();
+
             var captureStopwatch = Stopwatch.StartNew();
             var rawImagePath = await CaptureCameraImageAsync(saveImage: false);
             captureStopwatch.Stop();
@@ -71,6 +73,25 @@ public partial class MainWindow
         finally
         {
             UpdateBatchUi();
+        }
+    }
+
+    private async Task ClearPlcResultCodeBeforeCaptureAsync()
+    {
+        var client = _plcClient;
+        if (client is null || !client.IsConnected)
+        {
+            return;
+        }
+
+        try
+        {
+            await client.ClearResultCodeAsync();
+            Log("PLC新触发已受理: 拍照前先清D1010=0，避免沿用上一轮OK/NG结果。");
+        }
+        catch (Exception ex)
+        {
+            Log($"PLC拍照前清D1010失败，继续本次检测: {ex.Message}");
         }
     }
 
@@ -472,13 +493,42 @@ public partial class MainWindow
         {
             var line = lines[index];
             _fileLogger.Write(line);
-            LogList.Items.Insert(0, $"{DateTime.Now:HH:mm:ss} {line}");
+            LogList.Items.Insert(0, CreateRuntimeLogLine(line));
         }
 
         while (LogList.Items.Count > 80)
         {
             LogList.Items.RemoveAt(LogList.Items.Count - 1);
         }
+    }
+
+    private static RuntimeLogLine CreateRuntimeLogLine(string line)
+    {
+        var displayText = $"{DateTime.Now:HH:mm:ss} {line}";
+        if (IsRuntimeNgLine(line))
+        {
+            return new RuntimeLogLine(displayText, Brushes.Red, FontWeights.Bold);
+        }
+
+        if (IsRuntimeOkLine(line))
+        {
+            return new RuntimeLogLine(displayText, Brushes.ForestGreen, FontWeights.Bold);
+        }
+
+        return new RuntimeLogLine(displayText, Brushes.Black, FontWeights.Normal);
+    }
+
+    private static bool IsRuntimeOkLine(string line)
+    {
+        return line.StartsWith("结果:", StringComparison.Ordinal)
+            && line.IndexOf("OK", StringComparison.OrdinalIgnoreCase) >= 0;
+    }
+
+    private static bool IsRuntimeNgLine(string line)
+    {
+        return line.StartsWith("结果:", StringComparison.Ordinal)
+            && (line.IndexOf("NG", StringComparison.OrdinalIgnoreCase) >= 0
+                || line.IndexOf("ERROR", StringComparison.OrdinalIgnoreCase) >= 0);
     }
 
     private PlcOutputCommand CalculatePlcOutputCommand(InspectionMeasurement measurement)
@@ -490,4 +540,6 @@ public partial class MainWindow
     {
         _fileLogger.Write(message);
     }
+
+    private sealed record RuntimeLogLine(string DisplayText, Brush Foreground, FontWeight FontWeight);
 }

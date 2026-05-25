@@ -38,6 +38,10 @@ public partial class MainWindow
             _changeoverStatusText = null;
             _changeoverHintText = null;
             _changeoverSummaryText = null;
+            _changeoverTemplateSelector = null;
+            _changeoverBackSideNgCheckBox = null;
+            _changeoverBackSideNgUserEdited = false;
+            _updatingChangeoverBackSideNgCheckBox = false;
             _changeoverStartButton = null;
             _changeoverCaptureTemplateButton = null;
             _changeoverCancelButton = null;
@@ -53,11 +57,12 @@ public partial class MainWindow
         header.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(150) });
         header.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         header.RowDefinitions.Add(new RowDefinition { Height = new GridLength(52) });
+        header.RowDefinitions.Add(new RowDefinition { Height = new GridLength(52) });
         header.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
 
         header.Children.Add(new TextBlock
         {
-            Text = "当前型号",
+            Text = "工件模板",
             FontSize = 24,
             VerticalAlignment = VerticalAlignment.Center,
             HorizontalAlignment = HorizontalAlignment.Right,
@@ -75,6 +80,36 @@ public partial class MainWindow
         Grid.SetColumn(_changeoverModelBox, 1);
         header.Children.Add(_changeoverModelBox);
 
+        var templateListLabel = new TextBlock
+        {
+            Text = "已有模板",
+            FontSize = 24,
+            VerticalAlignment = VerticalAlignment.Center,
+            HorizontalAlignment = HorizontalAlignment.Right,
+            Margin = new Thickness(0, 0, 22, 0)
+        };
+        Grid.SetRow(templateListLabel, 1);
+        header.Children.Add(templateListLabel);
+
+        _changeoverTemplateSelector = new ComboBox
+        {
+            Height = 42,
+            FontSize = 22,
+            VerticalContentAlignment = VerticalAlignment.Center,
+            Padding = new Thickness(8, 0, 8, 0),
+            DisplayMemberPath = nameof(TemplateSelectionItem.DisplayText)
+        };
+        _changeoverTemplateSelector.SelectionChanged += (_, _) =>
+        {
+            if (_changeoverTemplateSelector.SelectedItem is TemplateSelectionItem item)
+            {
+                _changeoverModelBox.Text = item.ProductName;
+            }
+        };
+        Grid.SetRow(_changeoverTemplateSelector, 1);
+        Grid.SetColumn(_changeoverTemplateSelector, 1);
+        header.Children.Add(_changeoverTemplateSelector);
+
         _changeoverStatusText = new TextBlock
         {
             Text = "未开始",
@@ -83,7 +118,7 @@ public partial class MainWindow
             Foreground = Brushes.Black,
             Margin = new Thickness(0, 20, 0, 0)
         };
-        Grid.SetRow(_changeoverStatusText, 1);
+        Grid.SetRow(_changeoverStatusText, 2);
         Grid.SetColumnSpan(_changeoverStatusText, 2);
         header.Children.Add(_changeoverStatusText);
 
@@ -94,9 +129,24 @@ public partial class MainWindow
             TextWrapping = TextWrapping.Wrap,
             Margin = new Thickness(0, 58, 0, 0)
         };
-        Grid.SetRow(_changeoverHintText, 1);
+        Grid.SetRow(_changeoverHintText, 2);
         Grid.SetColumnSpan(_changeoverHintText, 2);
         header.Children.Add(_changeoverHintText);
+
+        _changeoverBackSideNgCheckBox = new CheckBox
+        {
+            Content = "此工件检查反面NG（正反面对称件不要勾选）",
+            IsChecked = _visionParameters.BackSideNgEnabled,
+            FontSize = 22,
+            FontWeight = FontWeights.Bold,
+            VerticalContentAlignment = VerticalAlignment.Center,
+            Margin = new Thickness(0, 118, 0, 0)
+        };
+        _changeoverBackSideNgCheckBox.Checked += (_, _) => MarkChangeoverBackSideNgUserEdited();
+        _changeoverBackSideNgCheckBox.Unchecked += (_, _) => MarkChangeoverBackSideNgUserEdited();
+        Grid.SetRow(_changeoverBackSideNgCheckBox, 2);
+        Grid.SetColumnSpan(_changeoverBackSideNgCheckBox, 2);
+        header.Children.Add(_changeoverBackSideNgCheckBox);
 
         root.Children.Add(header);
 
@@ -187,6 +237,7 @@ public partial class MainWindow
 
         dialog.Content = root;
         _changeoverDialog = dialog;
+        _ = RefreshChangeoverTemplateSelectorAsync();
         UpdateChangeoverFlow(
             activeStep: _changeoverTemplateRequested ? 2 : 0,
             completedSteps: _changeoverTemplateRequested ? 2 : 0,
@@ -197,6 +248,64 @@ public partial class MainWindow
             summary: null);
         dialog.Show();
     }
+
+    private void MarkChangeoverBackSideNgUserEdited()
+    {
+        if (!_updatingChangeoverBackSideNgCheckBox)
+        {
+            _changeoverBackSideNgUserEdited = true;
+        }
+    }
+
+    private void SetChangeoverBackSideNgCheckBox(bool enabled)
+    {
+        if (_changeoverBackSideNgCheckBox is null)
+        {
+            return;
+        }
+
+        _updatingChangeoverBackSideNgCheckBox = true;
+        try
+        {
+            _changeoverBackSideNgCheckBox.IsChecked = enabled;
+        }
+        finally
+        {
+            _updatingChangeoverBackSideNgCheckBox = false;
+        }
+    }
+
+    private async Task RefreshChangeoverTemplateSelectorAsync()
+    {
+        if (_changeoverTemplateSelector is null)
+        {
+            return;
+        }
+
+        try
+        {
+            var templates = await _repository.LoadTemplatesAsync();
+            var items = templates
+                .Select(template => new TemplateSelectionItem(
+                    template.ProductName,
+                    $"{template.ProductName}  {template.CreatedAt:yyyy-MM-dd HH:mm}  R={template.ReferenceAngleDegrees:F2}"))
+                .ToList();
+            _changeoverTemplateSelector.ItemsSource = items;
+            var current = _currentProductName.Trim();
+            var selected = items.FirstOrDefault(item =>
+                string.Equals(item.ProductName, current, StringComparison.OrdinalIgnoreCase));
+            if (selected is not null)
+            {
+                _changeoverTemplateSelector.SelectedItem = selected;
+            }
+        }
+        catch (Exception ex)
+        {
+            Log($"刷新工件模板列表失败: {ex.Message}");
+        }
+    }
+
+    private sealed record TemplateSelectionItem(string ProductName, string DisplayText);
 
     private void CancelChangeover()
     {

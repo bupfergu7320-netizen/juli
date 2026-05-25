@@ -123,6 +123,10 @@ public partial class MainWindow : System.Windows.Window
     private TextBlock? _changeoverStatusText;
     private TextBlock? _changeoverHintText;
     private TextBlock? _changeoverSummaryText;
+    private ComboBox? _changeoverTemplateSelector;
+    private CheckBox? _changeoverBackSideNgCheckBox;
+    private bool _changeoverBackSideNgUserEdited;
+    private bool _updatingChangeoverBackSideNgCheckBox;
     private Button? _changeoverStartButton;
     private Button? _changeoverCaptureTemplateButton;
     private Button? _changeoverCancelButton;

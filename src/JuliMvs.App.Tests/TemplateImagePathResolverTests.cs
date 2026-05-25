@@ -1,10 +1,13 @@
 using JuliMvs.App.Services;
 using JuliMvs.Core.Camera;
 using JuliMvs.Core.Inspection;
+using JuliMvs.Core.Persistence;
 using JuliMvs.Core.Vision;
+using JuliMvs.Persistence;
 using JuliMvs.Plc;
 using JuliMvs.Vision;
 using OpenCvSharp;
+using Microsoft.Data.Sqlite;
 using System.Text.Json;
 
 VerifyOldPublishedDataPathResolvesUnderCurrentBaseDirectory();
@@ -18,6 +21,13 @@ VerifyProductionOkDoesNotSaveImages();
 VerifyProductionNgSavesOnlyDiagnosticImage();
 VerifyManualInspectionKeepsExistingImageBehavior();
 VerifyClearCalibrationDisablesAllCalibrationButKeepsProductionSettings();
+VerifyProductRecipeKeepsBackSideNgPerProduct();
+VerifyProductRecipeClearsLegacyFrontBump();
+VerifyBackSideNgDoesNotRequireSelectedFrontBump();
+VerifyPlcOutputDirectionSettingsApplySimpleXySigns();
+VerifyDirectionFormatterShowsXySigns();
+VerifyProductTemplateNameIsUniqueAndRebuildOverwrites();
+VerifyLegacyDuplicateProductTemplatesKeepNewest();
 VerifyCalibrationBoardDetectionPrefersLowestRmsGrid();
 
 Console.WriteLine("App services keep template images portable, local settings backward-compatible, production image saving limited, and calibration clearing safe.");
@@ -276,6 +286,305 @@ static void VerifyClearCalibrationDisablesAllCalibrationButKeepsProductionSettin
     AssertDoubleEqual(-0.2, cleared.BackSideNgMaximumScoreDifference, "kept backside score diff");
     AssertDoubleEqual(-1.0, cleared.PlcOutputTransform?.Xx ?? 0, "kept PLC Xx");
     AssertDoubleEqual(1.2, cleared.PlcOutputTransform?.Yy ?? 0, "kept PLC Yy");
+}
+
+static void VerifyProductRecipeKeepsBackSideNgPerProduct()
+{
+    var currentRuntime = VisionParameters.Default with
+    {
+        CameraCalibration = new CameraCalibration
+        {
+            Enabled = true,
+            CalibrationId = "runtime-camera",
+            Points =
+            [
+                new CalibrationPoint(100, 200, 0, 0)
+            ]
+        },
+        RAxisCenterCalibration = new RAxisCenterCalibration
+        {
+            Enabled = true,
+            CalibrationId = "runtime-r",
+            SourceCameraCalibrationId = "runtime-camera",
+            CenterXMm = 1.2,
+            CenterYMm = 3.4
+        },
+        InvertRotationCompensation = true,
+        BackSideNgEnabled = false
+    };
+    var productRecipe = VisionParameters.Default with
+    {
+        BackSideNgEnabled = true,
+        BackSideNgMinimumBackScore = 0.58,
+        BackSideNgMaximumScoreDifference = -0.06,
+        InvertRotationCompensation = false
+    };
+
+    var saved = JuliMvs.Core.Persistence.ProductRecipeVisionParameters.ForSave(productRecipe);
+    var applied = JuliMvs.Core.Persistence.ProductRecipeVisionParameters.ApplyToRuntime(currentRuntime, saved);
+
+    AssertBoolEqual(true, saved.BackSideNgEnabled, "saved product backside NG");
+    AssertDoubleEqual(0.58, saved.BackSideNgMinimumBackScore, "saved backside min score");
+    AssertDoubleEqual(-0.06, saved.BackSideNgMaximumScoreDifference, "saved backside score diff");
+    AssertBoolEqual(true, applied.BackSideNgEnabled, "loaded product backside NG");
+    AssertBoolEqual(true, applied.CameraCalibration.Enabled, "kept runtime camera calibration");
+    AssertBoolEqual(true, applied.RAxisCenterCalibration.Enabled, "kept runtime R-axis calibration");
+    AssertBoolEqual(true, applied.InvertRotationCompensation, "kept global R direction");
+}
+
+static void VerifyPlcOutputDirectionSettingsApplySimpleXySigns()
+{
+    var transform = new PlcOutputTransform(
+        Xx: 0.5,
+        Xy: 0.25,
+        Yx: -0.25,
+        Yy: 0.75,
+        XBias: 3.0,
+        YBias: -4.0,
+        RScale: 1.5,
+        RBias: 2.0);
+
+    var applied = PlcOutputDirectionSettings.ApplySimpleXyDirection(
+        transform,
+        invertX: true,
+        invertY: false);
+
+    AssertDoubleEqual(-1.0, applied.Xx, "X invert Xx");
+    AssertDoubleEqual(0.0, applied.Xy, "X invert Xy");
+    AssertDoubleEqual(0.0, applied.XBias, "X invert XBias");
+    AssertDoubleEqual(0.0, applied.Yx, "X invert Yx");
+    AssertDoubleEqual(1.0, applied.Yy, "X invert Yy");
+    AssertDoubleEqual(0.0, applied.YBias, "X invert YBias");
+    AssertDoubleEqual(1.5, applied.RScale, "X invert keeps RScale");
+    AssertDoubleEqual(2.0, applied.RBias, "X invert keeps RBias");
+    AssertBoolEqual(true, PlcOutputDirectionSettings.IsSimpleXInverted(applied), "simple X inverted");
+    AssertBoolEqual(false, PlcOutputDirectionSettings.IsSimpleYInverted(applied), "simple Y not inverted");
+
+    var both = PlcOutputDirectionSettings.ApplySimpleXyDirection(
+        transform,
+        invertX: true,
+        invertY: true);
+    AssertDoubleEqual(-1.0, both.Xx, "both Xx");
+    AssertDoubleEqual(-1.0, both.Yy, "both Yy");
+    AssertBoolEqual(true, PlcOutputDirectionSettings.IsSimpleXInverted(both), "both X inverted");
+    AssertBoolEqual(true, PlcOutputDirectionSettings.IsSimpleYInverted(both), "both Y inverted");
+
+    var advanced = transform with { Xy = 0.25 };
+    AssertBoolEqual(false, PlcOutputDirectionSettings.IsSimpleXyTransform(advanced), "advanced matrix is not simple XY");
+}
+
+static void VerifyDirectionFormatterShowsXySigns()
+{
+    var text = TurntableStatusMessageFormatter.FormatDirectionText(
+        VisionParameters.Default with { InvertRotationCompensation = true },
+        PlcOutputTransform.Identity with { Xx = -1.0, Yy = -1.0 });
+
+    AssertBoolEqual(text.Contains("X方向=取反", StringComparison.Ordinal), true, "formatter X direction");
+    AssertBoolEqual(text.Contains("Y方向=取反", StringComparison.Ordinal), true, "formatter Y direction");
+    AssertBoolEqual(text.Contains("R方向=取反", StringComparison.Ordinal), true, "formatter R direction");
+
+    var advancedText = TurntableStatusMessageFormatter.FormatDirectionText(
+        VisionParameters.Default,
+        PlcOutputTransform.Identity with { Xy = 0.25 });
+    AssertBoolEqual(advancedText.Contains("X/Y方向=高级矩阵", StringComparison.Ordinal), true, "formatter advanced XY");
+}
+
+static void VerifyProductRecipeClearsLegacyFrontBump()
+{
+    var productRecipe = VisionParameters.Default with
+    {
+        BackSideNgEnabled = true,
+        FrontBumpFeature = new FrontBumpFeature
+        {
+            Enabled = true,
+            XPixel = 120.0,
+            YPixel = 230.0,
+            AngleDegrees = 15.0,
+            RadiusPixels = 80.0
+        }
+    };
+
+    var saved = JuliMvs.Core.Persistence.ProductRecipeVisionParameters.ForSave(productRecipe);
+
+    AssertBoolEqual(true, saved.BackSideNgEnabled, "saved backside NG");
+    AssertBoolEqual(false, saved.FrontBumpFeature.Enabled, "cleared legacy recipe front bump");
+}
+
+static void VerifyBackSideNgDoesNotRequireSelectedFrontBump()
+{
+    var templateImagePath = Path.Combine(CreateTempDirectory(), "template.bmp");
+    Directory.CreateDirectory(Path.GetDirectoryName(templateImagePath)!);
+    File.WriteAllText(templateImagePath, "template image placeholder");
+    var parameters = VisionParameters.Default with
+    {
+        BackSideNgEnabled = true,
+        CameraCalibration = new CameraCalibration
+        {
+            Enabled = true,
+            CalibrationId = "camera-1",
+            SourceDistortionCalibrationId = string.Empty
+        },
+        RAxisCenterCalibration = new RAxisCenterCalibration
+        {
+            Enabled = true,
+            SourceCameraCalibrationId = "camera-1"
+        }
+    };
+    var template = new PartTemplate(
+        Guid.NewGuid(),
+        "BATCH-1",
+        "PART-A",
+        templateImagePath,
+        DateTimeOffset.Now,
+        100,
+        100,
+        0,
+        0,
+        "camera-1",
+        string.Empty,
+        0,
+        10,
+        10,
+        100,
+        1,
+        ImageRoi.Empty,
+        parameters);
+
+    var setup = OpenCvVisionService.ValidateProductionSetup(template, parameters);
+
+    AssertBoolEqual(true, setup.IsReady, "backside NG setup without selected front bump");
+    AssertEqual(ProductionSetupBlockReason.None.ToString(), setup.Reason.ToString(), "backside NG setup reason");
+}
+
+static void VerifyProductTemplateNameIsUniqueAndRebuildOverwrites()
+{
+    var testRoot = CreateTempDirectory();
+    var repository = new SqliteInspectionRepository(Path.Combine(testRoot, "juli-mvs.db"));
+    repository.InitializeAsync().GetAwaiter().GetResult();
+
+    var first = CreateTemplate("PART-A", "BATCH-1", DateTimeOffset.Parse("2026-05-22T10:00:00+08:00"), 10.0);
+    var rebuilt = CreateTemplate("PART-A", "BATCH-2", DateTimeOffset.Parse("2026-05-23T10:00:00+08:00"), 20.0);
+    var other = CreateTemplate("PART-B", "BATCH-3", DateTimeOffset.Parse("2026-05-23T11:00:00+08:00"), 30.0);
+
+    repository.SaveTemplateAsync(first).GetAwaiter().GetResult();
+    repository.SaveTemplateAsync(rebuilt).GetAwaiter().GetResult();
+    repository.SaveTemplateAsync(other).GetAwaiter().GetResult();
+
+    var loaded = repository.LoadLatestTemplateAsync("PART-A").GetAwaiter().GetResult();
+    var all = repository.LoadTemplatesAsync().GetAwaiter().GetResult();
+
+    AssertEqual("BATCH-2", loaded?.BatchNo ?? string.Empty, "rebuilt template batch");
+    AssertDoubleEqual(20.0, loaded?.ReferenceCenterXMm ?? 0.0, "rebuilt template value");
+    AssertEqual(2.ToString(), all.Count.ToString(), "unique product template count");
+}
+
+static void VerifyLegacyDuplicateProductTemplatesKeepNewest()
+{
+    var testRoot = CreateTempDirectory();
+    var databasePath = Path.Combine(testRoot, "juli-mvs.db");
+    SeedLegacyDuplicateTemplates(databasePath);
+
+    var repository = new SqliteInspectionRepository(databasePath);
+    repository.InitializeAsync().GetAwaiter().GetResult();
+    var loaded = repository.LoadLatestTemplateAsync("PART-A").GetAwaiter().GetResult();
+    var all = repository.LoadTemplatesAsync().GetAwaiter().GetResult();
+
+    AssertEqual("BATCH-NEW", loaded?.BatchNo ?? string.Empty, "legacy duplicate newest batch");
+    AssertDoubleEqual(22.0, loaded?.ReferenceCenterXMm ?? 0.0, "legacy duplicate newest value");
+    AssertEqual(1.ToString(), all.Count.ToString(), "legacy duplicate unique count");
+}
+
+static PartTemplate CreateTemplate(
+    string productName,
+    string batchNo,
+    DateTimeOffset createdAt,
+    double referenceCenterXMm)
+{
+    return new PartTemplate(
+        Guid.NewGuid(),
+        batchNo,
+        productName,
+        Path.Combine(Path.GetTempPath(), $"{productName}-{batchNo}.bmp"),
+        createdAt,
+        100.0,
+        200.0,
+        referenceCenterXMm,
+        40.0,
+        "camera-1",
+        "distortion-1",
+        1.5,
+        10.0,
+        20.0,
+        300.0,
+        0.95,
+        ImageRoi.Empty,
+        VisionParameters.Default,
+        1000.0,
+        2000.0);
+}
+
+static void SeedLegacyDuplicateTemplates(string databasePath)
+{
+    Directory.CreateDirectory(Path.GetDirectoryName(databasePath)!);
+    using var connection = new SqliteConnection($"Data Source={databasePath}");
+    connection.Open();
+    using (var create = connection.CreateCommand())
+    {
+        create.CommandText = """
+            CREATE TABLE Templates (
+                Id TEXT PRIMARY KEY,
+                BatchNo TEXT NOT NULL,
+                ProductName TEXT NOT NULL,
+                ImagePath TEXT NULL,
+                CreatedAt TEXT NOT NULL,
+                ReferenceCenterXPixel REAL NOT NULL,
+                ReferenceCenterYPixel REAL NOT NULL,
+                ReferenceCenterXMm REAL NOT NULL,
+                ReferenceCenterYMm REAL NOT NULL,
+                SourceCameraCalibrationId TEXT NOT NULL,
+                SourceDistortionCalibrationId TEXT NOT NULL,
+                ReferenceAngleDegrees REAL NOT NULL,
+                ReferenceWidthPixels REAL NOT NULL DEFAULT 0.0,
+                ReferenceHeightPixels REAL NOT NULL DEFAULT 0.0,
+                WidthMm REAL NOT NULL,
+                HeightMm REAL NOT NULL,
+                AreaPixels REAL NOT NULL,
+                MatchScoreBaseline REAL NOT NULL,
+                ParametersJson TEXT NULL
+            );
+            """;
+        create.ExecuteNonQuery();
+    }
+
+    InsertLegacyTemplate(connection, "BATCH-OLD", "2026-05-22T10:00:00+08:00", 11.0);
+    InsertLegacyTemplate(connection, "BATCH-NEW", "2026-05-23T10:00:00+08:00", 22.0);
+}
+
+static void InsertLegacyTemplate(
+    SqliteConnection connection,
+    string batchNo,
+    string createdAt,
+    double referenceCenterXMm)
+{
+    using var command = connection.CreateCommand();
+    command.CommandText = """
+        INSERT INTO Templates (
+            Id, BatchNo, ProductName, ImagePath, CreatedAt,
+            ReferenceCenterXPixel, ReferenceCenterYPixel, ReferenceCenterXMm, ReferenceCenterYMm,
+            SourceCameraCalibrationId, SourceDistortionCalibrationId, ReferenceAngleDegrees,
+            ReferenceWidthPixels, ReferenceHeightPixels, WidthMm, HeightMm, AreaPixels, MatchScoreBaseline
+        ) VALUES (
+            $Id, $BatchNo, 'PART-A', NULL, $CreatedAt,
+            100.0, 200.0, $ReferenceCenterXMm, 40.0,
+            'camera-1', 'distortion-1', 1.5,
+            1000.0, 2000.0, 10.0, 20.0, 300.0, 0.95
+        );
+        """;
+    command.Parameters.AddWithValue("$Id", Guid.NewGuid().ToString());
+    command.Parameters.AddWithValue("$BatchNo", batchNo);
+    command.Parameters.AddWithValue("$CreatedAt", createdAt);
+    command.Parameters.AddWithValue("$ReferenceCenterXMm", referenceCenterXMm);
+    command.ExecuteNonQuery();
 }
 
 static void VerifyCalibrationBoardDetectionPrefersLowestRmsGrid()

@@ -1,3 +1,4 @@
+using System.Globalization;
 using JuliMvs.Core;
 using JuliMvs.Core.Vision;
 using OpenCvSharp;
@@ -13,6 +14,88 @@ public sealed class PoseInvariantTemplateMatcher
     private const double EdgeRingInnerOffsetPixels = 4.0;
     private const double EdgeRingOuterOffsetPixels = 4.0;
     private const double EdgeRingContrastScale = 22.0;
+
+    private readonly object _templateSimilarityModelSync = new();
+    private TemplateSimilarityModel? _cachedTemplateSimilarityModel;
+
+    private sealed class TemplateSimilarityModel : IDisposable
+    {
+        public TemplateSimilarityModel(
+            Guid templateId,
+            string imagePath,
+            long imageLength,
+            long imageLastWriteTimeUtcTicks,
+            string lensDistortionCacheKey,
+            Size templateSize,
+            Mat templateMask,
+            int templateMaskPixels,
+            Point2d templateAnchor,
+            Rect patchRect,
+            Mat templatePatch,
+            Point[]? templatePatchContour,
+            int templateEdgePixels,
+            Mat templateEdgeDistance)
+        {
+            TemplateId = templateId;
+            ImagePath = imagePath;
+            ImageLength = imageLength;
+            ImageLastWriteTimeUtcTicks = imageLastWriteTimeUtcTicks;
+            LensDistortionCacheKey = lensDistortionCacheKey;
+            TemplateSize = templateSize;
+            TemplateMask = templateMask;
+            TemplateMaskPixels = templateMaskPixels;
+            TemplateAnchor = templateAnchor;
+            PatchRect = patchRect;
+            TemplatePatch = templatePatch;
+            TemplatePatchContour = templatePatchContour;
+            TemplateEdgePixels = templateEdgePixels;
+            TemplateEdgeDistance = templateEdgeDistance;
+        }
+
+        public Guid TemplateId { get; }
+
+        public string ImagePath { get; }
+
+        public long ImageLength { get; }
+
+        public long ImageLastWriteTimeUtcTicks { get; }
+
+        public string LensDistortionCacheKey { get; }
+
+        public Size TemplateSize { get; }
+
+        public Mat TemplateMask { get; }
+
+        public int TemplateMaskPixels { get; }
+
+        public Point2d TemplateAnchor { get; }
+
+        public Rect PatchRect { get; }
+
+        public Mat TemplatePatch { get; }
+
+        public Point[]? TemplatePatchContour { get; }
+
+        public int TemplateEdgePixels { get; }
+
+        public Mat TemplateEdgeDistance { get; }
+
+        public bool Matches(PartTemplate template, FileInfo imageFile, string lensDistortionCacheKey)
+        {
+            return TemplateId == template.Id &&
+                string.Equals(ImagePath, imageFile.FullName, StringComparison.OrdinalIgnoreCase) &&
+                ImageLength == imageFile.Length &&
+                ImageLastWriteTimeUtcTicks == imageFile.LastWriteTimeUtc.Ticks &&
+                string.Equals(LensDistortionCacheKey, lensDistortionCacheKey, StringComparison.Ordinal);
+        }
+
+        public void Dispose()
+        {
+            TemplateMask.Dispose();
+            TemplatePatch.Dispose();
+            TemplateEdgeDistance.Dispose();
+        }
+    }
 
     private sealed record SimilarityScores(
         double FinalScore,
@@ -43,68 +126,93 @@ public sealed class PoseInvariantTemplateMatcher
         ArgumentNullException.ThrowIfNull(template);
         ArgumentNullException.ThrowIfNull(parameters);
 
-        if (string.IsNullOrWhiteSpace(template.ImagePath) || !File.Exists(template.ImagePath))
+        if (string.IsNullOrWhiteSpace(template.ImagePath))
         {
             return null;
         }
 
-        using var templateImage = Cv2.ImRead(template.ImagePath, ImreadModes.Color);
-        if (templateImage.Empty())
+        var templateImageFile = new FileInfo(template.ImagePath);
+        if (!templateImageFile.Exists)
         {
             return null;
         }
 
-        using var preparedTemplate = PrepareImage(templateImage, parameters);
-        using var templateMask = BuildTemplateMask(preparedTemplate, template);
         using var currentMask = BuildCurrentMask(preparedCurrentImage.Size(), currentDetection);
-        if (Cv2.CountNonZero(templateMask) == 0 || Cv2.CountNonZero(currentMask) == 0)
+        if (Cv2.CountNonZero(currentMask) == 0)
         {
             return null;
         }
 
-        var templateAnchor = CalculateMaskCentroid(
-            templateMask,
-            new Point2d(template.ReferenceCenterXPixel, template.ReferenceCenterYPixel));
-        var currentAnchor = CalculateMaskCentroid(
-            currentMask,
-            new Point2d(currentDetection.CenterXPixel, currentDetection.CenterYPixel));
-        var patchRect = BuildTemplatePatchRect(template, templateAnchor, preparedTemplate.Width, preparedTemplate.Height);
-        using var templatePatch = new Mat(templateMask, patchRect).Clone();
-        var sizeScore = CalculateSizeScore(currentDetection, template);
-        var angleCandidates = BuildAlignmentAngleCandidates(currentAngleDegrees, template.ReferenceAngleDegrees);
-        var scores = angleCandidates
-            .Select(candidate => CalculateSimilarityScores(
-                currentMask,
-                preparedTemplate.Size(),
-                templatePatch,
-                patchRect,
-                currentDetection,
-                template,
-                currentAnchor,
-                templateAnchor,
-                candidate.CurrentAngleDegrees,
-                candidate.TemplateAngleDegrees,
-                sizeScore,
-                candidate.Source))
-            .OrderByDescending(candidate => candidate.FinalScore)
-            .First();
-        var finalScore = scores.FinalScore;
-        var isReliable = scores.MaskIoU > 0.0001 || scores.ShapeScore > 0.0001 || scores.EdgeDistanceScore > 0.0001;
-        var isSamePart = isReliable && finalScore >= parameters.ShapeScoreThreshold;
-        var message =
-            $"pose-invariant score={finalScore:F3}, size={scores.SizeScore:F3}, shape={scores.ShapeScore:F3}, " +
-            $"maskIoU={scores.MaskIoU:F3}, edge={scores.EdgeDistanceScore:F3}, threshold={parameters.ShapeScoreThreshold:F3}, " +
-            $"alignment={scores.AlignmentSource}";
+        lock (_templateSimilarityModelSync)
+        {
+            var model = GetOrBuildTemplateSimilarityModel(template, parameters, templateImageFile);
+            if (model is null || model.TemplateMaskPixels == 0)
+            {
+                return null;
+            }
 
-        return new TemplateSimilarityResult(
-            finalScore,
-            scores.SizeScore,
-            scores.ShapeScore,
-            scores.MaskIoU,
-            scores.EdgeDistanceScore,
-            isSamePart,
-            isReliable,
-            message);
+            var currentAnchor = CalculateMaskCentroid(
+                currentMask,
+                new Point2d(currentDetection.CenterXPixel, currentDetection.CenterYPixel));
+            var sizeScore = CalculateSizeScore(currentDetection, template);
+            var angleCandidates = BuildAlignmentAngleCandidates(currentAngleDegrees, template.ReferenceAngleDegrees);
+            var scores = angleCandidates
+                .Select(candidate => CalculateSimilarityScores(
+                    currentMask,
+                    model.TemplatePatch,
+                    model.PatchRect,
+                    model.TemplatePatchContour,
+                    model.TemplateEdgePixels,
+                    model.TemplateEdgeDistance,
+                    currentAnchor,
+                    model.TemplateAnchor,
+                    candidate.CurrentAngleDegrees,
+                    candidate.TemplateAngleDegrees,
+                    sizeScore,
+                    candidate.Source))
+                .OrderByDescending(candidate => candidate.FinalScore)
+                .First();
+            var finalScore = scores.FinalScore;
+            var isReliable = scores.MaskIoU > 0.0001 || scores.ShapeScore > 0.0001 || scores.EdgeDistanceScore > 0.0001;
+            var isSamePart = isReliable && finalScore >= parameters.ShapeScoreThreshold;
+            var message =
+                $"位姿无关匹配分数={finalScore:F3}, 尺寸={scores.SizeScore:F3}, 轮廓={scores.ShapeScore:F3}, " +
+                $"掩膜重合={scores.MaskIoU:F3}, 边缘={scores.EdgeDistanceScore:F3}, 阈值={parameters.ShapeScoreThreshold:F3}, " +
+                $"对齐方式={scores.AlignmentSource}";
+
+            return new TemplateSimilarityResult(
+                finalScore,
+                scores.SizeScore,
+                scores.ShapeScore,
+                scores.MaskIoU,
+                scores.EdgeDistanceScore,
+                isSamePart,
+                isReliable,
+                message);
+        }
+    }
+
+    public bool Warmup(PartTemplate template, VisionParameters parameters)
+    {
+        ArgumentNullException.ThrowIfNull(template);
+        ArgumentNullException.ThrowIfNull(parameters);
+
+        if (string.IsNullOrWhiteSpace(template.ImagePath))
+        {
+            return false;
+        }
+
+        var templateImageFile = new FileInfo(template.ImagePath);
+        if (!templateImageFile.Exists)
+        {
+            return false;
+        }
+
+        lock (_templateSimilarityModelSync)
+        {
+            var model = GetOrBuildTemplateSimilarityModel(template, parameters, templateImageFile);
+            return model is not null && model.TemplateMaskPixels > 0;
+        }
     }
 
     public FrontBackDebugResult? CheckFrontBackDebug(
@@ -148,12 +256,16 @@ public sealed class PoseInvariantTemplateMatcher
             new Point2d(currentDetection.CenterXPixel, currentDetection.CenterYPixel));
         var patchRect = BuildTemplatePatchRect(template, templateAnchor, preparedTemplate.Width, preparedTemplate.Height);
         using var templatePatch = new Mat(templateMask, patchRect).Clone();
+        var templatePatchContour = FindLargestContour(templatePatch);
+        using var templateEdgeDistance = BuildTemplateEdgeDistance(templatePatch, out var templateEdgePixels);
         var sizeScore = CalculateSizeScore(currentDetection, template);
         var sameAngleOverlay = CalculateSameAngleOverlayDebug(
             currentMask,
-            preparedTemplate.Size(),
             templatePatch,
             patchRect,
+            templatePatchContour,
+            templateEdgePixels,
+            templateEdgeDistance,
             currentDetection,
             template,
             currentAnchor,
@@ -177,11 +289,11 @@ public sealed class PoseInvariantTemplateMatcher
         var frontScores = angleCandidates
             .Select(candidate => CalculateSimilarityScores(
                 currentMask,
-                preparedTemplate.Size(),
                 templatePatch,
                 patchRect,
-                currentDetection,
-                template,
+                templatePatchContour,
+                templateEdgePixels,
+                templateEdgeDistance,
                 currentAnchor,
                 templateAnchor,
                 candidate.CurrentAngleDegrees,
@@ -193,14 +305,16 @@ public sealed class PoseInvariantTemplateMatcher
 
         using var backTemplateMask = BuildOppositeFaceHypothesisMask(templateMask, templateAnchor);
         using var backTemplatePatch = new Mat(backTemplateMask, patchRect).Clone();
+        var backTemplatePatchContour = FindLargestContour(backTemplatePatch);
+        using var backTemplateEdgeDistance = BuildTemplateEdgeDistance(backTemplatePatch, out var backTemplateEdgePixels);
         var backScores = angleCandidates
             .Select(candidate => CalculateSimilarityScores(
                 currentMask,
-                preparedTemplate.Size(),
                 backTemplatePatch,
                 patchRect,
-                currentDetection,
-                template,
+                backTemplatePatchContour,
+                backTemplateEdgePixels,
+                backTemplateEdgeDistance,
                 currentAnchor,
                 templateAnchor,
                 currentAngleDegrees: -candidate.CurrentAngleDegrees,
@@ -339,10 +453,10 @@ public sealed class PoseInvariantTemplateMatcher
         }
 
         var message =
-            $"Fixed overlay debug: centerOnly mismatch={centerOnly.MismatchRatio:F3}, " +
-            $"resolved mismatch={resolved.MismatchRatio:F3}" +
-            (mirror is null ? string.Empty : $", mirror mismatch={mirror.MismatchRatio:F3}") +
-            ". Display only; not used for NG, PLC output, or XYR.";
+            $"固定角度叠放调试: 仅中心对齐差异={centerOnly.MismatchRatio:F3}, " +
+            $"识别角度对齐差异={resolved.MismatchRatio:F3}" +
+            (mirror is null ? string.Empty : $", 镜像角度对齐差异={mirror.MismatchRatio:F3}") +
+            "。此结果只显示，不参与自动NG、PLC输出或XYR计算。";
 
         return new FixedAngleOverlayDebugResult(
             centerOnly,
@@ -377,9 +491,11 @@ public sealed class PoseInvariantTemplateMatcher
 
     private static SameAngleOverlayDebugResult CalculateSameAngleOverlayDebug(
         Mat currentMask,
-        Size templateSize,
         Mat templatePatch,
         Rect patchRect,
+        Point[]? templatePatchContour,
+        int templateEdgePixels,
+        Mat templateEdgeDistance,
         PartDetection currentDetection,
         PartTemplate template,
         Point2d currentAnchor,
@@ -390,11 +506,11 @@ public sealed class PoseInvariantTemplateMatcher
     {
         var scores = CalculateSimilarityScores(
             currentMask,
-            templateSize,
             templatePatch,
             patchRect,
-            currentDetection,
-            template,
+            templatePatchContour,
+            templateEdgePixels,
+            templateEdgeDistance,
             currentAnchor,
             templateAnchor,
             currentAngleDegrees,
@@ -406,9 +522,9 @@ public sealed class PoseInvariantTemplateMatcher
         var isFrontLike = scores.FinalScore >= minimumScore && scores.MaskIoU >= minimumMaskIoU;
         var suggestedDecision = isFrontLike ? FrontBackDebugDecision.Front : FrontBackDebugDecision.Back;
         var message =
-            $"同角度叠放调试: score={scores.FinalScore:F3}, maskIoU={scores.MaskIoU:F3}, " +
-            $"shape={scores.ShapeScore:F3}, edge={scores.EdgeDistanceScore:F3}, size={scores.SizeScore:F3}, " +
-            $"判定参考: score>={minimumScore:F3} 且 maskIoU>={minimumMaskIoU:F3} 视为同角度可对齐。此结果只显示，不参与自动NG或PLC输出。";
+            $"同角度叠放调试: 分数={scores.FinalScore:F3}, 掩膜重合={scores.MaskIoU:F3}, " +
+            $"轮廓={scores.ShapeScore:F3}, 边缘={scores.EdgeDistanceScore:F3}, 尺寸={scores.SizeScore:F3}, " +
+            $"判定参考: 分数>={minimumScore:F3} 且 掩膜重合>={minimumMaskIoU:F3} 视为同角度可对齐。此结果只显示，不参与自动NG或PLC输出。";
 
         return new SameAngleOverlayDebugResult(
             scores.FinalScore,
@@ -583,11 +699,11 @@ public sealed class PoseInvariantTemplateMatcher
 
     private static SimilarityScores CalculateSimilarityScores(
         Mat currentMask,
-        Size templateSize,
         Mat templatePatch,
         Rect patchRect,
-        PartDetection currentDetection,
-        PartTemplate template,
+        Point[]? templatePatchContour,
+        int templateEdgePixels,
+        Mat templateEdgeDistance,
         Point2d currentAnchor,
         Point2d templateAnchor,
         double currentAngleDegrees,
@@ -595,20 +711,17 @@ public sealed class PoseInvariantTemplateMatcher
         double sizeScore,
         string alignmentSource)
     {
-        using var alignedCurrentMask = AlignCurrentMaskToTemplate(
+        using var currentPatch = AlignCurrentMaskPatchToTemplate(
             currentMask,
-            templateSize,
-            currentDetection,
-            template,
+            patchRect,
             currentAnchor,
             templateAnchor,
             currentAngleDegrees,
             templateAngleDegrees);
-        using var currentPatch = new Mat(alignedCurrentMask, patchRect).Clone();
 
         var maskIoU = CalculateMaskIoU(templatePatch, currentPatch);
-        var shapeScore = CalculateShapeScore(templatePatch, currentPatch);
-        var edgeDistanceScore = CalculateEdgeDistanceScore(templatePatch, currentPatch);
+        var shapeScore = CalculateShapeScore(templatePatchContour, currentPatch);
+        var edgeDistanceScore = CalculateEdgeDistanceScore(templateEdgePixels, templateEdgeDistance, currentPatch);
         var poseScore = Math.Clamp(
             (sizeScore * 0.25) +
             (shapeScore * 0.25) +
@@ -631,6 +744,79 @@ public sealed class PoseInvariantTemplateMatcher
             maskIoU,
             edgeDistanceScore,
             alignmentSource);
+    }
+
+    private TemplateSimilarityModel? GetOrBuildTemplateSimilarityModel(
+        PartTemplate template,
+        VisionParameters parameters,
+        FileInfo templateImageFile)
+    {
+        var lensDistortionCacheKey = BuildLensDistortionCacheKey(parameters.LensDistortionCalibration);
+        if (_cachedTemplateSimilarityModel is { } cached &&
+            cached.Matches(template, templateImageFile, lensDistortionCacheKey))
+        {
+            return cached;
+        }
+
+        _cachedTemplateSimilarityModel?.Dispose();
+        _cachedTemplateSimilarityModel = null;
+
+        using var templateImage = Cv2.ImRead(templateImageFile.FullName, ImreadModes.Color);
+        if (templateImage.Empty())
+        {
+            return null;
+        }
+
+        using var preparedTemplate = PrepareImage(templateImage, parameters);
+        var templateMask = BuildTemplateMask(preparedTemplate, template);
+        var templateMaskPixels = Cv2.CountNonZero(templateMask);
+        var templateAnchor = CalculateMaskCentroid(
+            templateMask,
+            new Point2d(template.ReferenceCenterXPixel, template.ReferenceCenterYPixel));
+        var patchRect = BuildTemplatePatchRect(template, templateAnchor, preparedTemplate.Width, preparedTemplate.Height);
+        var templatePatch = new Mat(templateMask, patchRect).Clone();
+        var templatePatchContour = FindLargestContour(templatePatch);
+        var templateEdgeDistance = BuildTemplateEdgeDistance(templatePatch, out var templateEdgePixels);
+
+        var model = new TemplateSimilarityModel(
+            template.Id,
+            templateImageFile.FullName,
+            templateImageFile.Length,
+            templateImageFile.LastWriteTimeUtc.Ticks,
+            lensDistortionCacheKey,
+            preparedTemplate.Size(),
+            templateMask,
+            templateMaskPixels,
+            templateAnchor,
+            patchRect,
+            templatePatch,
+            templatePatchContour,
+            templateEdgePixels,
+            templateEdgeDistance);
+        _cachedTemplateSimilarityModel = model;
+        return model;
+    }
+
+    private static string BuildLensDistortionCacheKey(LensDistortionCalibration calibration)
+    {
+        if (!calibration.Enabled)
+        {
+            return "disabled";
+        }
+
+        var matrix = string.Join(
+            ",",
+            calibration.CameraMatrix.Select(value => value.ToString("R", CultureInfo.InvariantCulture)));
+        var distortion = string.Join(
+            ",",
+            calibration.DistortionCoefficients.Select(value => value.ToString("R", CultureInfo.InvariantCulture)));
+        return string.Join(
+            "|",
+            calibration.CalibrationId,
+            calibration.ImageWidth.ToString(CultureInfo.InvariantCulture),
+            calibration.ImageHeight.ToString(CultureInfo.InvariantCulture),
+            matrix,
+            distortion);
     }
 
     private static Mat PrepareImage(Mat image, VisionParameters parameters)
@@ -703,6 +889,39 @@ public sealed class PoseInvariantTemplateMatcher
         return backMask;
     }
 
+    private static Mat AlignCurrentMaskPatchToTemplate(
+        Mat currentMask,
+        Rect patchRect,
+        Point2d currentAnchor,
+        Point2d templateAnchor,
+        double currentAngleDegrees,
+        double templateAngleDegrees)
+    {
+        var transformValues = BuildCurrentToTemplateAffineValues(
+            currentAnchor,
+            templateAnchor,
+            currentAngleDegrees,
+            templateAngleDegrees);
+        transformValues[2] -= patchRect.X;
+        transformValues[5] -= patchRect.Y;
+
+        using var transform = Mat.FromArray(new[,]
+        {
+            { transformValues[0], transformValues[1], transformValues[2] },
+            { transformValues[3], transformValues[4], transformValues[5] }
+        });
+        var patch = new Mat(patchRect.Size, MatType.CV_8UC1, Scalar.Black);
+        Cv2.WarpAffine(
+            currentMask,
+            patch,
+            transform,
+            patchRect.Size,
+            InterpolationFlags.Nearest,
+            BorderTypes.Constant,
+            Scalar.Black);
+        return patch;
+    }
+
     private static Mat AlignCurrentMaskToTemplate(
         Mat currentMask,
         Size templateSize,
@@ -713,21 +932,18 @@ public sealed class PoseInvariantTemplateMatcher
         double currentAngleDegrees,
         double templateAngleDegrees)
     {
-        var vectorLength = Math.Max(
-            Math.Max(template.ReferenceWidthPixels, template.ReferenceHeightPixels) / 2.0,
-            MinimumPatchPixels / 2.0);
-        var source = BuildPosePoints(
-            currentAnchor.X,
-            currentAnchor.Y,
+        _ = currentDetection;
+        _ = template;
+        var transformValues = BuildCurrentToTemplateAffineValues(
+            currentAnchor,
+            templateAnchor,
             currentAngleDegrees,
-            vectorLength);
-        var destination = BuildPosePoints(
-            templateAnchor.X,
-            templateAnchor.Y,
-            templateAngleDegrees,
-            vectorLength);
-
-        using var transform = Cv2.GetAffineTransform(source, destination);
+            templateAngleDegrees);
+        using var transform = Mat.FromArray(new[,]
+        {
+            { transformValues[0], transformValues[1], transformValues[2] },
+            { transformValues[3], transformValues[4], transformValues[5] }
+        });
         var aligned = new Mat(templateSize, MatType.CV_8UC1, Scalar.Black);
         Cv2.WarpAffine(
             currentMask,
@@ -738,6 +954,20 @@ public sealed class PoseInvariantTemplateMatcher
             BorderTypes.Constant,
             Scalar.Black);
         return aligned;
+    }
+
+    private static double[] BuildCurrentToTemplateAffineValues(
+        Point2d currentAnchor,
+        Point2d templateAnchor,
+        double currentAngleDegrees,
+        double templateAngleDegrees)
+    {
+        var deltaRadians = (templateAngleDegrees - currentAngleDegrees) * Math.PI / 180.0;
+        var cos = Math.Cos(deltaRadians);
+        var sin = Math.Sin(deltaRadians);
+        var tx = templateAnchor.X - (cos * currentAnchor.X) + (sin * currentAnchor.Y);
+        var ty = templateAnchor.Y - (sin * currentAnchor.X) - (cos * currentAnchor.Y);
+        return [cos, -sin, tx, sin, cos, ty];
     }
 
     private static Mat AlignCurrentMaskCenterOnly(
@@ -950,9 +1180,8 @@ public sealed class PoseInvariantTemplateMatcher
         return Math.Clamp(Cv2.CountNonZero(intersection) / (double)unionPixels, 0.0, 1.0);
     }
 
-    private static double CalculateShapeScore(Mat templatePatch, Mat currentPatch)
+    private static double CalculateShapeScore(Point[]? templateContour, Mat currentPatch)
     {
-        var templateContour = FindLargestContour(templatePatch);
         var currentContour = FindLargestContour(currentPatch);
         if (templateContour is null || currentContour is null)
         {
@@ -968,22 +1197,31 @@ public sealed class PoseInvariantTemplateMatcher
         return Math.Clamp(Math.Exp(-distance * 5.0), 0.0, 1.0);
     }
 
-    private static double CalculateEdgeDistanceScore(Mat templatePatch, Mat currentPatch)
+    private static double CalculateEdgeDistanceScore(
+        int templateEdgePixels,
+        Mat templateEdgeDistance,
+        Mat currentPatch)
     {
-        using var templateEdges = BuildMaskEdges(templatePatch);
         using var currentEdges = BuildMaskEdges(currentPatch);
         var currentEdgePixels = Cv2.CountNonZero(currentEdges);
-        if (currentEdgePixels == 0 || Cv2.CountNonZero(templateEdges) == 0)
+        if (currentEdgePixels == 0 || templateEdgePixels == 0)
         {
             return 0.0;
         }
 
+        var averageDistance = Cv2.Mean(templateEdgeDistance, currentEdges).Val0;
+        return Math.Clamp(Math.Exp(-averageDistance / EdgeDistanceScalePixels), 0.0, 1.0);
+    }
+
+    private static Mat BuildTemplateEdgeDistance(Mat templatePatch, out int templateEdgePixels)
+    {
+        using var templateEdges = BuildMaskEdges(templatePatch);
+        templateEdgePixels = Cv2.CountNonZero(templateEdges);
         using var distanceInput = new Mat();
         Cv2.BitwiseNot(templateEdges, distanceInput);
-        using var distance = new Mat();
+        var distance = new Mat();
         Cv2.DistanceTransform(distanceInput, distance, DistanceTypes.L2, DistanceTransformMasks.Mask3);
-        var averageDistance = Cv2.Mean(distance, currentEdges).Val0;
-        return Math.Clamp(Math.Exp(-averageDistance / EdgeDistanceScalePixels), 0.0, 1.0);
+        return distance;
     }
 
     private static Point[]? FindLargestContour(Mat mask)

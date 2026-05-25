@@ -13,7 +13,7 @@ public sealed record OpenCvInspectionOutput
         IReadOnlyList<ContourCandidateDiagnostic>? candidateDiagnostics = null,
         AngleResolutionDiagnostic? angleDiagnostic = null,
         TemplateSimilarityResult? templateSimilarity = null,
-        ContourMirrorFaceDebugResult? frontBackDecisionDiagnostic = null,
+        ContourSampleMirrorFaceDebugResult? contourSampleMirrorDecisionDiagnostic = null,
         VisionStageTimings? stageTimings = null)
     {
         Result = result;
@@ -22,7 +22,7 @@ public sealed record OpenCvInspectionOutput
         CandidateDiagnostics = candidateDiagnostics ?? Array.Empty<ContourCandidateDiagnostic>();
         AngleDiagnostic = angleDiagnostic;
         TemplateSimilarity = templateSimilarity;
-        FrontBackDecisionDiagnostic = frontBackDecisionDiagnostic;
+        ContourSampleMirrorDecisionDiagnostic = contourSampleMirrorDecisionDiagnostic;
         StageTimings = stageTimings ?? VisionStageTimings.Empty;
     }
 
@@ -38,7 +38,7 @@ public sealed record OpenCvInspectionOutput
 
     public TemplateSimilarityResult? TemplateSimilarity { get; init; }
 
-    public ContourMirrorFaceDebugResult? FrontBackDecisionDiagnostic { get; init; }
+    public ContourSampleMirrorFaceDebugResult? ContourSampleMirrorDecisionDiagnostic { get; init; }
 
     public VisionStageTimings StageTimings { get; init; }
 }

@@ -13,12 +13,12 @@ public sealed class CalibrationBoardVisionService
         ArgumentNullException.ThrowIfNull(image);
         if (rows < 2 || columns < 2)
         {
-            throw new ArgumentOutOfRangeException(nameof(rows), "Calibration board rows and columns must be at least 2.");
+            throw new ArgumentOutOfRangeException(nameof(rows), "标定板行数和列数都必须至少为2。");
         }
 
         if (spacingMm <= 0)
         {
-            throw new ArgumentOutOfRangeException(nameof(spacingMm), "Calibration board spacing must be greater than 0.");
+            throw new ArgumentOutOfRangeException(nameof(spacingMm), "标定板圆点间距必须大于0。");
         }
 
         var expectedCount = checked(rows * columns);
@@ -726,11 +726,11 @@ public sealed class CalibrationBoardVisionService
 
         var textLines = new[]
         {
-            $"Circle grid {grid.Count}x{grid[0].Count}",
-            $"Mode={detectionMode}",
+            $"圆点阵列 {grid.Count}x{grid[0].Count}",
+            $"模式={detectionMode}",
             $"X={pixelPerMmX:F4} px/mm Y={pixelPerMmY:F4} px/mm",
-            $"AVG={pixelPerMm:F4} px/mm Diff={xyDifferencePercent:F2}%",
-            $"RMS={rmsErrorPixels:F3}px Angle={boardAngleDegrees:F3}deg"
+            $"平均={pixelPerMm:F4} px/mm X/Y差异={xyDifferencePercent:F2}%",
+            $"RMS={rmsErrorPixels:F3}px 角度={boardAngleDegrees:F3}deg"
         };
         for (var i = 0; i < textLines.Length; i++)
         {
@@ -830,7 +830,7 @@ public sealed class CalibrationBoardVisionService
 
         Cv2.PutText(
             preview,
-            $"Detected {points.Count}/{expectedCount}",
+            $"已识别 {points.Count}/{expectedCount}",
             new Point(24, 42),
             HersheyFonts.HersheySimplex,
             1.0,

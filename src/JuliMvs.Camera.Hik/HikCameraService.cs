@@ -25,7 +25,7 @@ public sealed class HikCameraService : ICameraService
         var ret = MyCamera.MV_CC_EnumDevices_NET(
             MyCamera.MV_GIGE_DEVICE | MyCamera.MV_USB_DEVICE,
             ref _deviceList);
-        ThrowIfFailed(ret, "Enumerate Hikvision devices failed");
+        ThrowIfFailed(ret, "枚举海康相机设备失败");
 
         var devices = new List<CameraDeviceInfo>();
         for (var index = 0; index < _deviceList.nDeviceNum; index++)
@@ -45,25 +45,25 @@ public sealed class HikCameraService : ICameraService
         var devices = EnumerateDevices();
         if (devices.Count == 0)
         {
-            throw new InvalidOperationException("No Hikvision camera was found.");
+            throw new InvalidOperationException("未发现海康相机。");
         }
 
         var selected = ResolveDevice(devices, serialNumberOrIndex);
         var deviceInfo = ReadDeviceInfo(selected.Index);
         if (!IsDeviceAccessible(ref deviceInfo))
         {
-            throw new HikCameraException("Open Hikvision camera failed: device is not accessible", unchecked((int)0x80000203));
+            throw new HikCameraException("打开海康相机失败：设备不可访问", unchecked((int)0x80000203));
         }
 
         var camera = new MyCamera();
 
         var ret = camera.MV_CC_CreateDevice_NET(ref deviceInfo);
-        ThrowIfFailed(ret, "Create Hikvision camera handle failed");
+        ThrowIfFailed(ret, "创建海康相机句柄失败");
 
         try
         {
             ret = camera.MV_CC_OpenDevice_NET(MyCamera.MV_ACCESS_Control, 0);
-            ThrowIfFailed(ret, "Open Hikvision camera failed");
+            ThrowIfFailed(ret, "打开海康相机失败");
 
             ConfigureCamera(camera, deviceInfo);
             _configurationWarnings = ConfigureLowLatencyGrabbing(camera);
@@ -83,7 +83,7 @@ public sealed class HikCameraService : ICameraService
     {
         if (_camera is null)
         {
-            throw new InvalidOperationException("Camera is not open.");
+            throw new InvalidOperationException("相机未打开。");
         }
 
         var warnings = new List<string>(_configurationWarnings);
@@ -111,7 +111,7 @@ public sealed class HikCameraService : ICameraService
         {
             if (_camera is null)
             {
-                throw new InvalidOperationException("Camera is not open.");
+                throw new InvalidOperationException("相机未打开。");
             }
 
             if (!_isGrabbing)
@@ -124,7 +124,7 @@ public sealed class HikCameraService : ICameraService
             try
             {
                 var ret = _camera.MV_CC_GetImageBuffer_NET(ref frame, timeoutMilliseconds);
-                ThrowIfFailed(ret, "Get Hikvision image buffer failed");
+                ThrowIfFailed(ret, "获取海康相机图像缓存失败");
 
                 var length = checked((int)frame.stFrameInfo.nFrameLen);
                 var buffer = new byte[length];
@@ -168,7 +168,7 @@ public sealed class HikCameraService : ICameraService
             try
             {
                 var ret = MyCamera.MV_CC_Initialize_NET();
-                ThrowIfFailed(ret, "Initialize Hikvision MVS SDK failed");
+                ThrowIfFailed(ret, "初始化海康MVS SDK失败");
             }
             catch (EntryPointNotFoundException)
             {
@@ -203,13 +203,13 @@ public sealed class HikCameraService : ICameraService
         var ret = camera.MV_CC_SetImageNodeNum_NET(1);
         if (ret != MyCamera.MV_OK)
         {
-            warnings.Add($"海康相机缓存节点数设置为1失败: MVS error=0x{ret:X8}");
+            warnings.Add($"海康相机缓存节点数设置为1失败：MVS错误=0x{ret:X8}");
         }
 
         ret = camera.MV_CC_SetGrabStrategy_NET(MyCamera.MV_GRAB_STRATEGY.MV_GrabStrategy_LatestImagesOnly);
         if (ret != MyCamera.MV_OK)
         {
-            warnings.Add($"海康相机最新帧抓取策略设置失败: MVS error=0x{ret:X8}");
+            warnings.Add($"海康相机最新帧抓取策略设置失败：MVS错误=0x{ret:X8}");
         }
 
         return warnings;
@@ -223,7 +223,7 @@ public sealed class HikCameraService : ICameraService
     private void StartGrabbing(MyCamera camera)
     {
         var ret = camera.MV_CC_StartGrabbing_NET();
-        ThrowIfFailed(ret, "Start Hikvision grabbing failed");
+        ThrowIfFailed(ret, "启动海康相机取流失败");
         _isGrabbing = true;
     }
 
@@ -265,13 +265,13 @@ public sealed class HikCameraService : ICameraService
         }
 
         ret = camera.MV_CC_SetEnumValue_NET(key, numericValue);
-        ThrowIfFailed(ret, $"Set Hikvision camera enum '{key}' failed");
+        ThrowIfFailed(ret, $"设置海康相机枚举参数'{key}'失败");
     }
 
     private static void SetFloatValue(MyCamera camera, string key, double value)
     {
         var ret = camera.MV_CC_SetFloatValue_NET(key, (float)value);
-        ThrowIfFailed(ret, $"Set Hikvision camera float '{key}' failed");
+        ThrowIfFailed(ret, $"设置海康相机浮点参数'{key}'失败");
     }
 
     private static bool TrySetExposureTarget(MyCamera camera, int target)
@@ -315,7 +315,7 @@ public sealed class HikCameraService : ICameraService
             return byIpAddress;
         }
 
-        throw new InvalidOperationException($"Camera '{serialNumberOrIndex}' was not found.");
+        throw new InvalidOperationException($"未找到相机'{serialNumberOrIndex}'。");
     }
 
     private MyCamera.MV_CC_DEVICE_INFO ReadDeviceInfo(int index)
@@ -358,7 +358,7 @@ public sealed class HikCameraService : ICameraService
             return new CameraDeviceInfo(index, displayName, serial, model, "U3V", null);
         }
 
-        return new CameraDeviceInfo(index, $"Unknown camera {index}", string.Empty, string.Empty, "Unknown", null);
+        return new CameraDeviceInfo(index, $"未知相机 {index}", string.Empty, string.Empty, "未知", null);
     }
 
     private void StopGrabbing()

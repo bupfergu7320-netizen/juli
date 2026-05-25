@@ -10,6 +10,7 @@ public static class ProductRecipeVisionParameters
     {
         return parameters with
         {
+            FrontBumpFeature = FrontBumpFeature.Disabled,
             LensDistortionCalibration = LensDistortionCalibration.Disabled,
             CameraCalibration = CameraCalibration.Disabled,
             RAxisCenterCalibration = RAxisCenterCalibration.Disabled,
@@ -18,10 +19,7 @@ public static class ProductRecipeVisionParameters
                 MinimumRuntimeTemplateAngleScoreMargin),
             InvertXCompensation = false,
             InvertYCompensation = false,
-            InvertRotationCompensation = false,
-            BackSideNgEnabled = false,
-            BackSideNgMinimumBackScore = VisionParameters.Default.BackSideNgMinimumBackScore,
-            BackSideNgMaximumScoreDifference = VisionParameters.Default.BackSideNgMaximumScoreDifference
+            InvertRotationCompensation = false
         };
     }
 
@@ -39,10 +37,7 @@ public static class ProductRecipeVisionParameters
                 MinimumRuntimeTemplateAngleScoreMargin),
             InvertXCompensation = currentRuntimeParameters.InvertXCompensation,
             InvertYCompensation = currentRuntimeParameters.InvertYCompensation,
-            InvertRotationCompensation = currentRuntimeParameters.InvertRotationCompensation,
-            BackSideNgEnabled = currentRuntimeParameters.BackSideNgEnabled,
-            BackSideNgMinimumBackScore = currentRuntimeParameters.BackSideNgMinimumBackScore,
-            BackSideNgMaximumScoreDifference = currentRuntimeParameters.BackSideNgMaximumScoreDifference
+            InvertRotationCompensation = currentRuntimeParameters.InvertRotationCompensation
         };
     }
 }

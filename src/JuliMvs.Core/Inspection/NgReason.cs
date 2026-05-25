@@ -10,5 +10,6 @@ public enum NgReason
     CameraError = 5,
     PlcError = 6,
     AlgorithmError = 7,
-    BackSideDetected = 8
+    BackSideDetected = 8,
+    FrontBumpMissing = 9
 }

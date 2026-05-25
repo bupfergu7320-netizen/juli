@@ -39,7 +39,7 @@ internal sealed class ChangeoverTemplateReportWriter
         var diagnosticImagePath = Path.Combine(directory, $"{fileToken}-diagnostic.bmp");
         if (!Cv2.ImWrite(diagnosticImagePath, context.SelfCheck.Output.DiagnosticImage))
         {
-            throw new IOException($"Failed to save changeover template self-check diagnostic image: {diagnosticImagePath}");
+            throw new IOException($"保存换型模板自检诊断图失败：{diagnosticImagePath}");
         }
 
         var reportPath = Path.Combine(directory, $"{fileToken}.json");
@@ -63,7 +63,7 @@ internal sealed class ChangeoverTemplateReportWriter
         {
             SchemaVersion = 1,
             SavedAt = savedAt,
-            Purpose = "Changeover template self-check before saving template and recipe.",
+            Purpose = "保存模板和配方前的换型模板自检。",
             Passed = selfCheck.Passed,
             selfCheck.Message,
             Files = new
@@ -115,7 +115,9 @@ internal sealed class ChangeoverTemplateReportWriter
                 parameters.TemplateAngleMinimumScoreMargin,
                 parameters.InvertXCompensation,
                 parameters.InvertYCompensation,
-                parameters.InvertRotationCompensation
+                parameters.InvertRotationCompensation,
+                parameters.BackSideNgEnabled,
+                BackSideNgRule = "外轮廓半径序列镜像匹配；旧的人工凸起特征不参与判断。"
             },
             ReplayInputs = new
             {

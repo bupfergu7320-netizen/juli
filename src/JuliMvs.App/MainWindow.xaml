@@ -359,7 +359,9 @@
                             </ListBox.ItemContainerStyle>
                             <ListBox.ItemTemplate>
                                 <DataTemplate>
-                                    <TextBlock Text="{Binding}"
+                                    <TextBlock Text="{Binding DisplayText}"
+                                               Foreground="{Binding Foreground}"
+                                               FontWeight="{Binding FontWeight}"
                                                TextWrapping="Wrap" />
                                 </DataTemplate>
                             </ListBox.ItemTemplate>

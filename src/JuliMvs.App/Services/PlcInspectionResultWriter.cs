@@ -15,7 +15,7 @@ internal sealed class PlcInspectionResultWriter
     {
         if (client is null || !client.IsConnected)
         {
-            log("PLC not connected; inspection result was not written.");
+            log("PLC未连接，检测结果未写入。");
             return PlcInspectionResultWriteOutcome.NotConnected;
         }
 
@@ -26,32 +26,32 @@ internal sealed class PlcInspectionResultWriter
             var plcOutput = PlcInspectionOutputCalculator.CalculateFinalCorrection(measurement, outputTransform);
             var preRotationOutput = PlcInspectionOutputCalculator.CalculatePreRotationCorrection(measurement, outputTransform);
             log(
-                "PLC write completed: final R-axis-center correction output " +
+                "PLC写入完成：R轴中心后的最终纠偏输出 " +
                 $"D1002={FormatPlcValueText(plcOutput.XDeviation)}, " +
                 $"D1004={FormatPlcValueText(plcOutput.YDeviation)}, " +
                 $"D1006={FormatPlcValueText(plcOutput.RDeviation)}, " +
-                $"vision deviation current-template X={FormatPlcValueText(measurement.XOffsetMm)}, " +
+                $"视觉偏差(当前-模板) X={FormatPlcValueText(measurement.XOffsetMm)}, " +
                 $"Y={FormatPlcValueText(measurement.YOffsetMm)}, " +
                 $"R={FormatPlcValueText(measurement.AngleOffsetDegrees)}, " +
-                $"pre-rotation correction template-current X={FormatPlcValueText(-measurement.XOffsetMm)}, " +
+                $"旋转前纠偏量(模板-当前) X={FormatPlcValueText(-measurement.XOffsetMm)}, " +
                 $"Y={FormatPlcValueText(-measurement.YOffsetMm)}, " +
                 $"R={FormatPlcValueText(-measurement.AngleOffsetDegrees)}, " +
-                $"R-after reference correction X={FormatPlcValueText(measurement.XCompensationMm)}, " +
+                $"R轴中心后纠偏量 X={FormatPlcValueText(measurement.XCompensationMm)}, " +
                 $"Y={FormatPlcValueText(measurement.YCompensationMm)}, " +
                 $"R={FormatPlcValueText(measurement.RotationCompensationDegrees)}, " +
-                $"old pre-rotation output reference D1002={FormatPlcValueText(preRotationOutput.XDeviation)}, " +
+                $"旋转前旧输出仅参考 D1002={FormatPlcValueText(preRotationOutput.XDeviation)}, " +
                 $"D1004={FormatPlcValueText(preRotationOutput.YDeviation)}, " +
                 $"D1006={FormatPlcValueText(preRotationOutput.RDeviation)}, " +
-                $"PLC deviation transform {outputTransformText}, " +
+                $"PLC偏差输出坐标系 {outputTransformText}, " +
                 "D1010=1.");
             var readbackAfterWrite = await LogPlcOutputReadbackAsync(client, log);
-            log("PLC result handed off: PC will clear D1000=0 after writing D1010.");
+            log("PLC结果已交接：上位机写入D1010后将清D1000=0。");
             return await ClearTriggerAndBuildOutcomeAsync(client, readbackAfterWrite, log);
         }
 
-        log("PLC write completed: D1010=2.");
+        log("PLC写入完成：D1010=2。");
         var ngReadbackAfterWrite = await LogPlcOutputReadbackAsync(client, log);
-        log("PLC result handed off: PC will clear D1000=0 after writing D1010.");
+        log("PLC结果已交接：上位机写入D1010后将清D1000=0。");
         return await ClearTriggerAndBuildOutcomeAsync(client, ngReadbackAfterWrite, log);
     }
 
@@ -63,21 +63,21 @@ internal sealed class PlcInspectionResultWriter
         try
         {
             await client.ClearTriggerAsync();
-            log("PC cleared PLC trigger: D1000=0.");
+            log("上位机已清PLC触发位：D1000=0。");
             var readbackAfterClear = await LogPlcOutputReadbackAsync(client, log);
 
             if (readbackAfterClear?.Trigger == 0)
             {
-                log("PLC trigger clear confirmed: D1000=0; standard handshake completed and next trigger is allowed.");
+                log("PLC触发位清除确认：D1000=0；标准握手完成，允许下一次触发。");
                 return PlcInspectionResultWriteOutcome.Cleared(readbackAfterWrite, readbackAfterClear);
             }
 
-            log($"PLC trigger clear readback abnormal: D1000={readbackAfterClear?.Trigger.ToString(CultureInfo.InvariantCulture) ?? "unknown"}.");
+            log($"PLC触发位清除后读回异常：D1000={readbackAfterClear?.Trigger.ToString(CultureInfo.InvariantCulture) ?? "未知"}。");
             return PlcInspectionResultWriteOutcome.WriteCompleted(readbackAfterWrite, readbackAfterClear);
         }
         catch (Exception ex)
         {
-            log($"PC clear D1000 failed: {ex.Message}");
+            log($"上位机清D1000失败：{ex.Message}");
             throw;
         }
     }
@@ -90,7 +90,7 @@ internal sealed class PlcInspectionResultWriter
         {
             var readback = await client.ReadOutputReadbackAsync();
             log(
-                "PLC readback check: " +
+                "PLC读回检查：" +
                 $"D1000={readback.Trigger}, " +
                 $"D1002={FormatPlcValueText(readback.XDeviation)}, " +
                 $"D1004={FormatPlcValueText(readback.YDeviation)}, " +
@@ -100,7 +100,7 @@ internal sealed class PlcInspectionResultWriter
         }
         catch (Exception ex)
         {
-            log($"PLC readback check failed: {ex.Message}");
+            log($"PLC读回检查失败：{ex.Message}");
             return null;
         }
     }

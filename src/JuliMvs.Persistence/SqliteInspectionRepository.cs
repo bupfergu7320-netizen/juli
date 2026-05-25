@@ -52,7 +52,8 @@ public sealed class SqliteInspectionRepository : IInspectionRepository
                 WidthMm REAL NOT NULL,
                 HeightMm REAL NOT NULL,
                 AreaPixels REAL NOT NULL,
-                MatchScoreBaseline REAL NOT NULL
+                MatchScoreBaseline REAL NOT NULL,
+                ParametersJson TEXT NULL
             );
             """, cancellationToken);
         await MigrateTemplatesTableAsync(connection, cancellationToken);
@@ -91,6 +92,11 @@ public sealed class SqliteInspectionRepository : IInspectionRepository
                 Json TEXT NOT NULL
             );
             """, cancellationToken);
+        await EnsureUniqueProductTemplateRowsAsync(connection, cancellationToken);
+        await ExecuteAsync(
+            connection,
+            "CREATE UNIQUE INDEX IF NOT EXISTS IX_Templates_ProductName_Unique ON Templates(ProductName);",
+            cancellationToken);
     }
 
     public async Task SaveTemplateAsync(PartTemplate template, CancellationToken cancellationToken = default)
@@ -101,19 +107,38 @@ public sealed class SqliteInspectionRepository : IInspectionRepository
         await connection.OpenAsync(cancellationToken);
         await using var command = connection.CreateCommand();
         command.CommandText = """
-            INSERT OR REPLACE INTO Templates (
+            INSERT INTO Templates (
                 Id, BatchNo, ProductName, ImagePath, CreatedAt,
                 ReferenceCenterXPixel, ReferenceCenterYPixel, ReferenceCenterXMm, ReferenceCenterYMm,
                 SourceCameraCalibrationId, SourceDistortionCalibrationId, ReferenceAngleDegrees,
                 ReferenceWidthPixels, ReferenceHeightPixels,
-                WidthMm, HeightMm, AreaPixels, MatchScoreBaseline
+                WidthMm, HeightMm, AreaPixels, MatchScoreBaseline, ParametersJson
             ) VALUES (
                 $Id, $BatchNo, $ProductName, $ImagePath, $CreatedAt,
                 $ReferenceCenterXPixel, $ReferenceCenterYPixel, $ReferenceCenterXMm, $ReferenceCenterYMm,
                 $SourceCameraCalibrationId, $SourceDistortionCalibrationId, $ReferenceAngleDegrees,
                 $ReferenceWidthPixels, $ReferenceHeightPixels,
-                $WidthMm, $HeightMm, $AreaPixels, $MatchScoreBaseline
-            );
+                $WidthMm, $HeightMm, $AreaPixels, $MatchScoreBaseline, $ParametersJson
+            )
+            ON CONFLICT(ProductName) DO UPDATE SET
+                Id = excluded.Id,
+                BatchNo = excluded.BatchNo,
+                ImagePath = excluded.ImagePath,
+                CreatedAt = excluded.CreatedAt,
+                ReferenceCenterXPixel = excluded.ReferenceCenterXPixel,
+                ReferenceCenterYPixel = excluded.ReferenceCenterYPixel,
+                ReferenceCenterXMm = excluded.ReferenceCenterXMm,
+                ReferenceCenterYMm = excluded.ReferenceCenterYMm,
+                SourceCameraCalibrationId = excluded.SourceCameraCalibrationId,
+                SourceDistortionCalibrationId = excluded.SourceDistortionCalibrationId,
+                ReferenceAngleDegrees = excluded.ReferenceAngleDegrees,
+                ReferenceWidthPixels = excluded.ReferenceWidthPixels,
+                ReferenceHeightPixels = excluded.ReferenceHeightPixels,
+                WidthMm = excluded.WidthMm,
+                HeightMm = excluded.HeightMm,
+                AreaPixels = excluded.AreaPixels,
+                MatchScoreBaseline = excluded.MatchScoreBaseline,
+                ParametersJson = excluded.ParametersJson;
             """;
         command.Parameters.AddWithValue("$Id", template.Id.ToString());
         command.Parameters.AddWithValue("$BatchNo", template.BatchNo);
@@ -133,6 +158,7 @@ public sealed class SqliteInspectionRepository : IInspectionRepository
         command.Parameters.AddWithValue("$HeightMm", template.HeightMm);
         command.Parameters.AddWithValue("$AreaPixels", template.AreaPixels);
         command.Parameters.AddWithValue("$MatchScoreBaseline", template.MatchScoreBaseline);
+        command.Parameters.AddWithValue("$ParametersJson", JsonSerializer.Serialize(template.Parameters, JsonOptions));
         await command.ExecuteNonQueryAsync(cancellationToken);
     }
 
@@ -150,7 +176,7 @@ public sealed class SqliteInspectionRepository : IInspectionRepository
                    ReferenceCenterXPixel, ReferenceCenterYPixel, ReferenceCenterXMm, ReferenceCenterYMm,
                    SourceCameraCalibrationId, SourceDistortionCalibrationId,
                    ReferenceAngleDegrees, ReferenceWidthPixels, ReferenceHeightPixels,
-                   WidthMm, HeightMm, AreaPixels, MatchScoreBaseline
+                   WidthMm, HeightMm, AreaPixels, MatchScoreBaseline, ParametersJson
             FROM Templates
             WHERE ProductName = $ProductName
             ORDER BY CreatedAt DESC
@@ -164,27 +190,32 @@ public sealed class SqliteInspectionRepository : IInspectionRepository
             return null;
         }
 
-        return new PartTemplate(
-            Guid.Parse(reader.GetString(0)),
-            reader.GetString(1),
-            reader.GetString(2),
-            reader.IsDBNull(3) ? null : reader.GetString(3),
-            DateTimeOffset.Parse(reader.GetString(4), CultureInfo.InvariantCulture),
-            reader.GetDouble(5),
-            reader.GetDouble(6),
-            reader.GetDouble(7),
-            reader.GetDouble(8),
-            reader.GetString(9),
-            reader.GetString(10),
-            reader.GetDouble(11),
-            reader.GetDouble(14),
-            reader.GetDouble(15),
-            reader.GetDouble(16),
-            reader.GetDouble(17),
-            ImageRoi.Empty,
-            VisionParameters.Default,
-            reader.GetDouble(12),
-            reader.GetDouble(13));
+        return ReadTemplate(reader);
+    }
+
+    public async Task<IReadOnlyList<PartTemplate>> LoadTemplatesAsync(CancellationToken cancellationToken = default)
+    {
+        await using var connection = new SqliteConnection(_connectionString);
+        await connection.OpenAsync(cancellationToken);
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT Id, BatchNo, ProductName, ImagePath, CreatedAt,
+                   ReferenceCenterXPixel, ReferenceCenterYPixel, ReferenceCenterXMm, ReferenceCenterYMm,
+                   SourceCameraCalibrationId, SourceDistortionCalibrationId,
+                   ReferenceAngleDegrees, ReferenceWidthPixels, ReferenceHeightPixels,
+                   WidthMm, HeightMm, AreaPixels, MatchScoreBaseline, ParametersJson
+            FROM Templates
+            ORDER BY ProductName COLLATE NOCASE ASC;
+            """;
+
+        var templates = new List<PartTemplate>();
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            templates.Add(ReadTemplate(reader));
+        }
+
+        return templates;
     }
 
     public async Task SaveResultAsync(InspectionResult result, CancellationToken cancellationToken = default)
@@ -306,7 +337,8 @@ public sealed class SqliteInspectionRepository : IInspectionRepository
             "WidthMm",
             "HeightMm",
             "AreaPixels",
-            "MatchScoreBaseline"
+            "MatchScoreBaseline",
+            "ParametersJson"
         };
 
         var currentColumns = await ReadTableColumnsAsync(connection, "Templates", cancellationToken);
@@ -335,7 +367,8 @@ public sealed class SqliteInspectionRepository : IInspectionRepository
                 WidthMm REAL NOT NULL,
                 HeightMm REAL NOT NULL,
                 AreaPixels REAL NOT NULL,
-                MatchScoreBaseline REAL NOT NULL
+                MatchScoreBaseline REAL NOT NULL,
+                ParametersJson TEXT NULL
             );
             """, cancellationToken);
 
@@ -348,6 +381,56 @@ public sealed class SqliteInspectionRepository : IInspectionRepository
             cancellationToken);
         await ExecuteAsync(connection, "DROP TABLE Templates;", cancellationToken);
         await ExecuteAsync(connection, "ALTER TABLE Templates_Migrated RENAME TO Templates;", cancellationToken);
+    }
+
+    private static async Task EnsureUniqueProductTemplateRowsAsync(
+        SqliteConnection connection,
+        CancellationToken cancellationToken)
+    {
+        await ExecuteAsync(connection, """
+            DELETE FROM Templates
+            WHERE rowid NOT IN (
+                SELECT keep.RowIdToKeep
+                FROM (
+                    SELECT ProductName, rowid AS RowIdToKeep
+                    FROM Templates AS outerTemplate
+                    WHERE rowid = (
+                        SELECT rowid
+                        FROM Templates AS innerTemplate
+                        WHERE innerTemplate.ProductName = outerTemplate.ProductName
+                        ORDER BY datetime(CreatedAt) DESC, CreatedAt DESC, rowid DESC
+                        LIMIT 1
+                    )
+                ) AS keep
+            );
+            """, cancellationToken);
+    }
+
+    private static PartTemplate ReadTemplate(SqliteDataReader reader)
+    {
+        return new PartTemplate(
+            Guid.Parse(reader.GetString(0)),
+            reader.GetString(1),
+            reader.GetString(2),
+            reader.IsDBNull(3) ? null : reader.GetString(3),
+            DateTimeOffset.Parse(reader.GetString(4), CultureInfo.InvariantCulture),
+            reader.GetDouble(5),
+            reader.GetDouble(6),
+            reader.GetDouble(7),
+            reader.GetDouble(8),
+            reader.GetString(9),
+            reader.GetString(10),
+            reader.GetDouble(11),
+            reader.GetDouble(14),
+            reader.GetDouble(15),
+            reader.GetDouble(16),
+            reader.GetDouble(17),
+            ImageRoi.Empty,
+            reader.IsDBNull(18)
+                ? VisionParameters.Default
+                : JsonSerializer.Deserialize<VisionParameters>(reader.GetString(18), JsonOptions) ?? VisionParameters.Default,
+            reader.GetDouble(12),
+            reader.GetDouble(13));
     }
 
     private static string BuildTemplatesMigrationExpression(string column, ISet<string> currentColumns)
@@ -373,6 +456,7 @@ public sealed class SqliteInspectionRepository : IInspectionRepository
                 "HeightMm" => "COALESCE(HeightMm, 0.0)",
                 "AreaPixels" => "COALESCE(AreaPixels, 0.0)",
                 "MatchScoreBaseline" => "COALESCE(MatchScoreBaseline, 1.0)",
+                "ParametersJson" => "ParametersJson",
                 _ => column
             };
         }
@@ -397,7 +481,8 @@ public sealed class SqliteInspectionRepository : IInspectionRepository
             "HeightMm" => "0.0",
             "AreaPixels" => "0.0",
             "MatchScoreBaseline" => "1.0",
-            _ => throw new InvalidOperationException($"Unsupported Templates migration column: {column}.")
+            "ParametersJson" => "NULL",
+            _ => throw new InvalidOperationException($"不支持的模板表迁移字段：{column}。")
         };
     }
 

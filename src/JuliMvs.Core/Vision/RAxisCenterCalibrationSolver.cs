@@ -9,7 +9,7 @@ public static class RAxisCenterCalibrationSolver
         var pointList = points.ToList();
         if (pointList.Count < 3)
         {
-            throw new ArgumentException("R axis center calibration requires at least three points.", nameof(points));
+            throw new ArgumentException("R轴中心标定至少需要3个点。", nameof(points));
         }
 
         EnsureNonCollinear(pointList);
@@ -30,7 +30,7 @@ public static class RAxisCenterCalibrationSolver
 
         if (candidates.Count == 0)
         {
-            throw new InvalidOperationException("R axis center calibration points are degenerate; use points from different R angles.");
+            throw new InvalidOperationException("R轴中心标定点退化；请使用不同R角度采集的点位。");
         }
 
         var best = candidates[0];
@@ -70,7 +70,7 @@ public static class RAxisCenterCalibrationSolver
 
         if (maxArea < 1e-8)
         {
-            throw new InvalidOperationException("R axis center calibration points are degenerate; use points from different R angles.");
+            throw new InvalidOperationException("R轴中心标定点退化；请使用不同R角度采集的点位。");
         }
     }
 
@@ -169,7 +169,7 @@ public static class RAxisCenterCalibrationSolver
 
             if (bestValue < 1e-12)
             {
-                throw new InvalidOperationException("R axis center calibration points are degenerate; use points from different R angles.");
+                throw new InvalidOperationException("R轴中心标定点退化；请使用不同R角度采集的点位。");
             }
 
             if (bestRow != pivot)

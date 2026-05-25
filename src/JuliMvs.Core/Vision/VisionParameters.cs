@@ -52,9 +52,42 @@ public sealed record VisionParameters
 
     public bool BackSideNgEnabled { get; init; }
 
+    public FrontBumpFeature FrontBumpFeature { get; init; } = FrontBumpFeature.Disabled;
+
     public double BackSideNgMinimumBackScore { get; init; } = 0.0;
 
     public double BackSideNgMaximumScoreDifference { get; init; } = 0.0;
 
     public static VisionParameters Default { get; } = new();
+}
+
+public sealed record FrontBumpFeature
+{
+    public bool Enabled { get; init; }
+
+    public double XPixel { get; init; }
+
+    public double YPixel { get; init; }
+
+    public double AngleDegrees { get; init; }
+
+    public double RadiusPixels { get; init; }
+
+    public double WindowDegrees { get; init; } = 12.0;
+
+    public double MinimumRadiusRatio { get; init; } = 0.85;
+
+    public double SideOffsetDegrees { get; init; } = 24.0;
+
+    public double SideWindowDegrees { get; init; } = 6.0;
+
+    public double ReferenceProminencePixels { get; init; }
+
+    public double MinimumProminenceRatio { get; init; } = 0.35;
+
+    public double MinimumProminencePixels { get; init; } = 8.0;
+
+    public double MaximumAngleDifferenceDegrees { get; init; } = 18.0;
+
+    public static FrontBumpFeature Disabled { get; } = new();
 }

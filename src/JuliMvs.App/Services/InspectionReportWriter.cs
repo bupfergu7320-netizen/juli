@@ -135,7 +135,7 @@ internal sealed class InspectionReportWriter
                 parameters.InvertYCompensation,
                 parameters.InvertRotationCompensation,
                 parameters.BackSideNgEnabled,
-                BackSideNgRule = "ContourMirror.ScoreDifference < 0",
+                BackSideNgRule = "外轮廓半径序列镜像匹配：比较当前工件与正面模板、镜像模板的整圈半径误差；旧的人工凸起特征不参与判断。",
                 parameters.BackSideNgMinimumBackScore,
                 parameters.BackSideNgMaximumScoreDifference
             },
@@ -181,8 +181,8 @@ internal sealed class InspectionReportWriter
             Angle = output.AngleDiagnostic,
             DebugOnly = new
             {
-                FrontBack = context.FrontBackDebug,
-                ProductionFrontBackDecision = output.FrontBackDecisionDiagnostic
+                LegacyFrontBack = context.FrontBackDebug,
+                ContourSampleMirrorDecision = output.ContourSampleMirrorDecisionDiagnostic
             },
             Plc = new
             {
@@ -238,7 +238,7 @@ internal sealed class InspectionReportWriter
         {
             SchemaVersion = 1,
             SavedAt = savedAt,
-            Purpose = "Passive PLC verification during normal automatic production. No extra unit-test motion was commanded.",
+            Purpose = "正常自动生产过程中的被动PLC验证；不会额外发出测试动作命令。",
             Safety = new
             {
                 PassiveOnly = true,
@@ -285,10 +285,10 @@ internal sealed class InspectionReportWriter
             },
             Interpretation = new
             {
-                Compare = "For OK results, compare ExpectedPlcCorrectionCommand with ReadbackAfterWrite D1002/D1004/D1006. They should match after PLC rounding. D1002/D1004/D1006 are final R-axis-center correction values.",
-                RAxisDirection = "RAxisCenter.MachineAngleDirection is the machine XY rotation direction for positive PLC R. Old calibration files with 0 are inferred from saved R-axis center points.",
-                IfPartDoesNotFit = "Use RawImagePath/ResultImagePath with this report to replay the same image and compare actual machine behavior.",
-                Limitation = "This report proves what the PC wrote and read back. It does not measure the physical machine movement by itself."
+                Compare = "OK结果请比较ExpectedPlcCorrectionCommand与ReadbackAfterWrite里的D1002/D1004/D1006；PLC四舍五入后应一致。D1002/D1004/D1006是R轴中心后的最终纠偏量。",
+                RAxisDirection = "RAxisCenter.MachineAngleDirection表示PLC R正方向在机器XY平面里的旋转方向；旧标定文件为0时，会从保存的R轴中心点自动推断。",
+                IfPartDoesNotFit = "如果工件放不进模具，请结合RawImagePath/ResultImagePath复盘同一张图片，并对比机器实际动作。",
+                Limitation = "本报告只能证明上位机写入和读回的PLC数值；不能单独证明机器实际物理运动方向。"
             }
         };
     }

@@ -108,7 +108,7 @@ public static class CameraCalibrationSolver
 
             if (bestValue < 1e-12)
             {
-                throw new InvalidOperationException("Calibration points are degenerate; use non-collinear points.");
+                throw new InvalidOperationException("标定点退化，不能共线；请使用不在同一直线上的点位。");
             }
 
             if (bestRow != pivot)

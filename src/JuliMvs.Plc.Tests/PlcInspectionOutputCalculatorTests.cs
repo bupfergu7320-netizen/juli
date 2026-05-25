@@ -6,6 +6,7 @@ VerifyPlcFinalCorrectionUsesRDirectionFromCalibration();
 VerifyRCommandDirectionIsCoupledIntoXyCompensation();
 VerifyLegacyRAxisCalibrationDirectionIsInferred();
 VerifyPlcOutputUsesFinalCorrectionMeasurement();
+VerifyXyOutputSignsDoNotChangeR();
 
 Console.WriteLine("PLC final correction output uses R-axis center, machine R direction, and XCompensation/YCompensation/RotationCompensation.");
 
@@ -129,6 +130,46 @@ if (Math.Abs(finalOutput.XDeviation - preRotationOutput.XDeviation) < 0.001 ||
 {
     throw new InvalidOperationException("Final PLC XY output must use R-axis-center compensation, not pre-rotation correction.");
 }
+}
+
+static void VerifyXyOutputSignsDoNotChangeR()
+{
+    var measurement = new InspectionMeasurement(
+        CenterXPixel: 0,
+        CenterYPixel: 0,
+        XOffsetMm: 0,
+        YOffsetMm: 0,
+        XCompensationMm: 12.34,
+        YCompensationMm: -56.78,
+        AngleDegrees: 0,
+        AngleOffsetDegrees: 0,
+        RotationCompensationDegrees: 9.87,
+        WidthMm: 254.0,
+        HeightMm: 253.0,
+        AreaPixels: 4510000.0,
+        MatchScore: 0.99);
+
+    var invertedX = PlcInspectionOutputCalculator.CalculateFinalCorrection(
+        measurement,
+        PlcOutputTransform.Identity with { Xx = -1.0 });
+    var invertedY = PlcInspectionOutputCalculator.CalculateFinalCorrection(
+        measurement,
+        PlcOutputTransform.Identity with { Yy = -1.0 });
+    var invertedBoth = PlcInspectionOutputCalculator.CalculateFinalCorrection(
+        measurement,
+        PlcOutputTransform.Identity with { Xx = -1.0, Yy = -1.0 });
+
+    AssertEqual(-12.34, invertedX.XDeviation, "invertedX.XDeviation");
+    AssertEqual(-56.78, invertedX.YDeviation, "invertedX.YDeviation");
+    AssertEqual(9.87, invertedX.RDeviation, "invertedX.RDeviation");
+
+    AssertEqual(12.34, invertedY.XDeviation, "invertedY.XDeviation");
+    AssertEqual(56.78, invertedY.YDeviation, "invertedY.YDeviation");
+    AssertEqual(9.87, invertedY.RDeviation, "invertedY.RDeviation");
+
+    AssertEqual(-12.34, invertedBoth.XDeviation, "invertedBoth.XDeviation");
+    AssertEqual(56.78, invertedBoth.YDeviation, "invertedBoth.YDeviation");
+    AssertEqual(9.87, invertedBoth.RDeviation, "invertedBoth.RDeviation");
 }
 
 static void AssertEqual(double expected, double actual, string name)

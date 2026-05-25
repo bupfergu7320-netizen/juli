@@ -1,6 +1,5 @@
 using System.Windows;
 using System.Windows.Controls;
-using System.Windows.Media;
 using JuliMvs.App.Services;
 using JuliMvs.Core.Batch;
 using JuliMvs.Core.Inspection;
@@ -15,6 +14,7 @@ public partial class MainWindow
         try
         {
             var productName = (_changeoverModelBox?.Text ?? _currentProductName).Trim();
+            var checkBackSideNg = _changeoverBackSideNgCheckBox?.IsChecked == true;
             if (string.IsNullOrWhiteSpace(productName))
             {
                 throw new InvalidOperationException("型号不能为空，无法加载模板。");
@@ -26,6 +26,23 @@ public partial class MainWindow
             }
 
             _currentProductName = productName;
+            var recipeLoaded = await LoadRecipeAsync(productName, showMessageWhenMissing: false);
+            if (_changeoverBackSideNgUserEdited)
+            {
+                _visionParameters = _visionParameters with
+                {
+                    BackSideNgEnabled = checkBackSideNg,
+                    FrontBumpFeature = FrontBumpFeature.Disabled
+                };
+                SetChangeoverBackSideNgCheckBox(checkBackSideNg);
+                await SaveRecipeAsync(productName);
+                Log($"型号反面NG设置已保存: {productName}, {FormatProductBackSideNgSummary(checkBackSideNg)}");
+            }
+            else if (!recipeLoaded)
+            {
+                SetChangeoverBackSideNgCheckBox(_visionParameters.BackSideNgEnabled);
+            }
+
             var batchNo = BatchNumberGenerator.GenerateDefaultBatchNo();
             var templateLoaded = await StartBatchWithLatestTemplateAsync(batchNo, productName);
 
@@ -48,6 +65,7 @@ public partial class MainWindow
                     summary:
                         $"型号: {productName}\n" +
                         $"批次: {batchNo}\n" +
+                        $"反面NG: {FormatProductBackSideNgSummary(_visionParameters.BackSideNgEnabled)}\n" +
                         "状态: 已加载当前型号标准位/模板\n" +
                         templateBaselineSummary +
                         "机器方向: " +
@@ -92,6 +110,7 @@ public partial class MainWindow
         {
             var batchNo = BatchNumberGenerator.GenerateDefaultBatchNo();
             var productName = (_changeoverModelBox?.Text ?? _currentProductName).Trim();
+            var checkBackSideNg = _changeoverBackSideNgCheckBox?.IsChecked == true;
             if (string.IsNullOrWhiteSpace(productName))
             {
                 throw new InvalidOperationException("型号不能为空。请先输入或选择型号。");
@@ -118,6 +137,16 @@ public partial class MainWindow
             ResetProductionCounters();
             ClearCurrentInspection();
             await LoadRecipeAsync(productName, showMessageWhenMissing: false);
+            if (_changeoverBackSideNgUserEdited)
+            {
+                _visionParameters = _visionParameters with
+                {
+                    BackSideNgEnabled = checkBackSideNg,
+                    FrontBumpFeature = FrontBumpFeature.Disabled
+                };
+                SetChangeoverBackSideNgCheckBox(checkBackSideNg);
+            }
+            await SaveRecipeAsync(productName);
 
             _changeoverTemplateRequested = true;
             _changeoverStartButton?.SetCurrentValue(IsEnabledProperty, false);
@@ -130,7 +159,12 @@ public partial class MainWindow
                 completedSteps: 2,
                 status: "等待上位机拍照",
                 hint: "请确认标准件已放到检测位OK位置并吸附稳定，然后点击“拍照设标准位/模板”。软件会把当前X/Y/R保存为当前型号标准位。",
-                summary: $"型号: {productName}\n批次: {batchNo}\n状态: 等待上位机拍照建立标准位/模板\n当前型号标准位: 等待保存X/Y/R");
+                summary:
+                    $"型号: {productName}\n" +
+                    $"批次: {batchNo}\n" +
+                    $"反面NG: {FormatProductBackSideNgSummary(_visionParameters.BackSideNgEnabled)}\n" +
+                    "状态: 等待上位机拍照建立标准位/模板\n" +
+                    "当前型号标准位: 等待保存X/Y/R");
         }
         catch (Exception ex)
         {
@@ -232,12 +266,26 @@ public partial class MainWindow
         }
 
         var parameters = ReadVisionParameters();
+        parameters = parameters with
+        {
+            BackSideNgEnabled = _changeoverBackSideNgCheckBox?.IsChecked == true,
+            FrontBumpFeature = FrontBumpFeature.Disabled
+        };
+        _visionParameters = _visionParameters with
+        {
+            BackSideNgEnabled = parameters.BackSideNgEnabled,
+            FrontBumpFeature = FrontBumpFeature.Disabled
+        };
         var template = _visionService.CreateTemplate(
             _lastCameraImage!,
             _batchSession.BatchNo,
             _batchSession.ProductName,
             parameters,
             rawImagePath);
+        parameters = parameters with { FrontBumpFeature = FrontBumpFeature.Disabled };
+        template = template with { Parameters = parameters };
+        _visionParameters = _visionParameters with { FrontBumpFeature = FrontBumpFeature.Disabled };
+
         var templateImagePath = _inspectionFileStore.SaveTemplateImage(
             _lastCameraImage!,
             template.ProductName,
@@ -264,6 +312,7 @@ public partial class MainWindow
 
         await _repository.SaveTemplateAsync(_template);
         await SaveRecipeAsync(_batchSession.ProductName);
+        await RefreshChangeoverTemplateSelectorAsync();
 
         if (_batchSession.CanBuildTemplate)
         {
@@ -294,6 +343,7 @@ public partial class MainWindow
                 $"标准位/模板建立完成\n\n" +
                 $"型号: {_template.ProductName}\n" +
                 $"批次: {_template.BatchNo}\n" +
+                $"反面NG: {FormatProductBackSideNgSummary(_visionParameters.BackSideNgEnabled)}\n" +
                 $"{InspectionDiagnosticMessageFormatter.FormatTemplateBaselineSummary(_template)}\n" +
                 $"宽度: {_template.WidthMm:F3}mm\n" +
                 $"高度: {_template.HeightMm:F3}mm\n" +
@@ -326,4 +376,10 @@ public partial class MainWindow
             selfCheckEvidence.DiagnosticImagePath);
         _lastInspectionResult = templateResult;
     }
+
+    private static string FormatProductBackSideNgSummary(bool enabled)
+    {
+        return enabled ? "已启用（反面判NG）" : "未启用（正反面对称/不检查）";
+    }
+
 }

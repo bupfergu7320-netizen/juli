@@ -35,7 +35,7 @@ public sealed class BatchSession
 
         if (Status is BatchStatus.WaitingFirstArticle or BatchStatus.TemplateCreated or BatchStatus.Running)
         {
-            throw new InvalidOperationException("Current batch must be ended before starting a new batch.");
+            throw new InvalidOperationException("开始新批次前必须先结束当前批次。");
         }
 
         BatchNo = batchNo.Trim();
@@ -47,7 +47,7 @@ public sealed class BatchSession
     {
         if (!CanBuildTemplate)
         {
-            throw new InvalidOperationException($"Cannot create template while batch status is {Status}.");
+            throw new InvalidOperationException($"当前批次状态为{FormatStatus(Status)}，不能建立模板。");
         }
 
         Status = BatchStatus.TemplateCreated;
@@ -57,7 +57,7 @@ public sealed class BatchSession
     {
         if (!CanConfirmFirstArticle)
         {
-            throw new InvalidOperationException($"Cannot confirm first article while batch status is {Status}.");
+            throw new InvalidOperationException($"当前批次状态为{FormatStatus(Status)}，不能确认首件。");
         }
 
         Status = BatchStatus.Running;
@@ -67,9 +67,22 @@ public sealed class BatchSession
     {
         if (!CanEnd)
         {
-            throw new InvalidOperationException($"Cannot end batch while batch status is {Status}.");
+            throw new InvalidOperationException($"当前批次状态为{FormatStatus(Status)}，不能结束批次。");
         }
 
         Status = BatchStatus.Ended;
+    }
+
+    private static string FormatStatus(BatchStatus status)
+    {
+        return status switch
+        {
+            BatchStatus.NotStarted => "未开始",
+            BatchStatus.WaitingFirstArticle => "等待首件",
+            BatchStatus.TemplateCreated => "模板已建立",
+            BatchStatus.Running => "生产中",
+            BatchStatus.Ended => "已结束",
+            _ => status.ToString()
+        };
     }
 }

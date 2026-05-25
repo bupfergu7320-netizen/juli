@@ -171,12 +171,7 @@ public partial class MainWindow
             InvertXCompensation = settings.InvertXCompensation,
             InvertYCompensation = settings.InvertYCompensation,
             InvertRotationCompensation = settings.InvertRotationCompensation ||
-                (settings.PlcOutputTransform?.RScale < 0.0),
-            BackSideNgEnabled = settings.BackSideNgEnabled,
-            BackSideNgMinimumBackScore = NormalizeBackSideNgMinimumBackScore(
-                settings.BackSideNgMinimumBackScore),
-            BackSideNgMaximumScoreDifference = NormalizeBackSideNgMaximumScoreDifference(
-                settings.BackSideNgMaximumScoreDifference)
+                (settings.PlcOutputTransform?.RScale < 0.0)
         };
         _plcOutputTransform = NormalizePlcOutputTransform(settings.PlcOutputTransform ?? PlcOutputTransform.Identity);
         ApplyCalibrationToUi(settings.CameraCalibration);
@@ -229,15 +224,13 @@ public partial class MainWindow
         bool invertX,
         bool invertY,
         bool invertRotation,
-        bool backSideNgEnabled,
         PlcOutputTransform? plcOutputTransform = null)
     {
         _visionParameters = _visionParameters with
         {
             InvertXCompensation = invertX,
             InvertYCompensation = invertY,
-            InvertRotationCompensation = invertRotation,
-            BackSideNgEnabled = backSideNgEnabled
+            InvertRotationCompensation = invertRotation
         };
         if (plcOutputTransform is not null)
         {
@@ -280,9 +273,6 @@ public partial class MainWindow
             InvertXCompensation = _visionParameters.InvertXCompensation,
             InvertYCompensation = _visionParameters.InvertYCompensation,
             InvertRotationCompensation = _visionParameters.InvertRotationCompensation,
-            BackSideNgEnabled = _visionParameters.BackSideNgEnabled,
-            BackSideNgMinimumBackScore = _visionParameters.BackSideNgMinimumBackScore,
-            BackSideNgMaximumScoreDifference = _visionParameters.BackSideNgMaximumScoreDifference,
             PlcOutputTransform = _plcOutputTransform
         };
     }
@@ -299,20 +289,6 @@ public partial class MainWindow
         return transform.RScale < 0.0
             ? transform with { RScale = Math.Abs(transform.RScale) }
             : transform;
-    }
-
-    private static double NormalizeBackSideNgMinimumBackScore(double value)
-    {
-        return double.IsFinite(value) && value >= 0.0 && value <= 1.0
-            ? value
-            : VisionParameters.Default.BackSideNgMinimumBackScore;
-    }
-
-    private static double NormalizeBackSideNgMaximumScoreDifference(double value)
-    {
-        return double.IsFinite(value) && value <= 0.0
-            ? value
-            : VisionParameters.Default.BackSideNgMaximumScoreDifference;
     }
 
     private void SaveLocalSettings()

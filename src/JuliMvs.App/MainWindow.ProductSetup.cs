@@ -19,7 +19,6 @@ using JuliMvs.App.Services;
 using JuliMvs.Persistence;
 using JuliMvs.Plc;
 using JuliMvs.Vision;
-using OpenCvSharp;
 
 namespace JuliMvs.App;
 
@@ -90,7 +89,7 @@ public partial class MainWindow
 
     private async Task<bool> LoadProductSetupForBatchAsync(string batchNo, string productName)
     {
-        await LoadRecipeAsync(productName, showMessageWhenMissing: false);
+        var recipeLoaded = await LoadRecipeAsync(productName, showMessageWhenMissing: false);
 
         var loadedTemplate = await _repository.LoadLatestTemplateAsync(productName);
         if (loadedTemplate is null)
@@ -102,6 +101,12 @@ public partial class MainWindow
         if (!string.Equals(template.ImagePath, loadedTemplate.ImagePath, StringComparison.OrdinalIgnoreCase))
         {
             Log($"模板图片路径已重定位: {loadedTemplate.ImagePath} -> {template.ImagePath}");
+        }
+
+        if (!recipeLoaded)
+        {
+            ApplyRecipeVisionParameters(loadedTemplate.Parameters);
+            SetChangeoverBackSideNgCheckBox(_visionParameters.BackSideNgEnabled);
         }
 
         var activeParameters = ReadVisionParameters();
@@ -120,8 +125,17 @@ public partial class MainWindow
         };
         _templateImagePath = template.ImagePath;
         RenderTemplateSummary(_template);
+        WarmupProductionTemplate(_template, activeParameters);
         Log($"产品模板已加载: {productName}, 来源批次: {template.BatchNo}, 模板时间: {template.CreatedAt:yyyy-MM-dd HH:mm:ss}");
         return true;
+    }
+
+    private void WarmupProductionTemplate(PartTemplate template, VisionParameters parameters)
+    {
+        var startedAt = DateTimeOffset.Now;
+        _visionService.WarmupProductionTemplate(template, parameters);
+        var elapsedMs = (long)(DateTimeOffset.Now - startedAt).TotalMilliseconds;
+        Log($"生产模板缓存已预热: {elapsedMs}ms，首件PLC触发无需再初始化模板/角度缓存。");
     }
 
     private void RequireMachineCalibrationReady()
@@ -161,6 +175,12 @@ public partial class MainWindow
         var recipe = await _repository.LoadProductRecipeAsync(productName);
         if (recipe is null)
         {
+            _visionParameters = _visionParameters with
+            {
+                BackSideNgEnabled = false,
+                FrontBumpFeature = FrontBumpFeature.Disabled
+            };
+            SetChangeoverBackSideNgCheckBox(false);
             if (showMessageWhenMissing)
             {
                 MessageBox.Show($"未找到型号配方: {productName}", "提示", MessageBoxButton.OK, MessageBoxImage.Information);
@@ -170,6 +190,7 @@ public partial class MainWindow
         }
 
         ApplyRecipeVisionParameters(recipe.VisionParameters);
+        SetChangeoverBackSideNgCheckBox(_visionParameters.BackSideNgEnabled);
         _cameraSettings = recipe.CameraSettings;
         SaveLocalSettings();
         await ApplyCameraSettingsToConnectedCameraAsync();
@@ -177,7 +198,18 @@ public partial class MainWindow
             $"型号配方已加载: {productName}，" +
             $"曝光{_cameraSettings.ExposureTimeMicroseconds:F1}us，" +
             $"增益{_cameraSettings.Gain:F1}，" +
-            $"曝光延迟{_cameraSettings.CaptureDelaySeconds:F3}s");
+            $"曝光延迟{_cameraSettings.CaptureDelaySeconds:F3}s，" +
+            $"反面NG{FormatRecipeBackSideNgState(_visionParameters)}");
         return true;
+    }
+
+    private static string FormatRecipeBackSideNgState(VisionParameters parameters)
+    {
+        if (!parameters.BackSideNgEnabled)
+        {
+            return "未启用";
+        }
+
+        return "已启用，轮廓采样镜像匹配";
     }
 }

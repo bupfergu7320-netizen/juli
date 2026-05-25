@@ -66,6 +66,20 @@ public sealed record ContourMirrorFaceDebugResult(
     double SearchRangeDegrees,
     string Message);
 
+public sealed record ContourSampleMirrorFaceDebugResult(
+    double FrontScore,
+    double BackScore,
+    double ScoreDifference,
+    bool IsReliable,
+    FrontBackDebugDecision SuggestedDecision,
+    int SampleCount,
+    double MinimumScoreDifference,
+    double CurrentSignal,
+    double TemplateSignal,
+    double FrontAngleOffsetDegrees,
+    double BackAngleOffsetDegrees,
+    string Message);
+
 public sealed record FixedAngleOverlayDebugResult(
     FixedAngleOverlayVariantDebugResult CenterOnly,
     FixedAngleOverlayVariantDebugResult ResolvedAngle,

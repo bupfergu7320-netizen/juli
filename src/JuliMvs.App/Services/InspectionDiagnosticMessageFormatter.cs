@@ -126,7 +126,7 @@ internal sealed class InspectionDiagnosticMessageFormatter
 
         lines.Add($"PLC\u504f\u5dee\u8f93\u51fa\u5750\u6807\u7cfb: {FormatPlcOutputTransform(outputTransform)}");
         lines.Add(Format("\u8bc6\u522b\u5206\u6570: {0:F3}", measurement.MatchScore));
-        lines.Add(result.Message.StartsWith("Angle NG", StringComparison.Ordinal)
+        lines.Add(result.Message.StartsWith("角度NG", StringComparison.Ordinal)
             ? "\u89d2\u5ea6\u6765\u6e90: \u6a21\u677f\u65cb\u8f6c\u5339\u914d\u4e0d\u53ef\u9760\uff0c\u6b63\u5f0f\u6d41\u7a0b\u4f1a\u5199D1010=2\u3002"
             : "\u89d2\u5ea6\u6765\u6e90: \u8be6\u89c1\u68c0\u6d4b\u8bca\u65ad\u56fe\u548c\u62a5\u544aAngle\u5b57\u6bb5\u3002");
         lines.Add(BuildAngleCandidatesText(angleDiagnostic));
@@ -156,7 +156,7 @@ internal sealed class InspectionDiagnosticMessageFormatter
         foreach (var candidate in angleDiagnostic.Candidates.Take(maxItems))
         {
             lines.Add(Format(
-                "Rank={0} {1}: offset={2:F3}deg, resolved={3:F3}deg, score={4:F3}",
+                "排名={0} {1}: 偏移={2:F3}deg, 结果角度={3:F3}deg, 分数={4:F3}",
                 candidate.Rank,
                 candidate.Stage,
                 candidate.AngleOffsetDegrees,
@@ -189,7 +189,7 @@ internal sealed class InspectionDiagnosticMessageFormatter
         {
             var selected = candidate.IsSelected ? "\u9009\u4e2d" : "\u5019\u9009";
             lines.Add(Format(
-                "{0} Rank={1} C{2} {3}: score={4:F3}, center=({5:F1}px,{6:F1}px), W={7:F3}mm H={8:F3}mm, Area={9:F0}px, Fill={10:F3}, Dist={11:F1}px",
+                "{0} 排名={1} C{2} {3}: 分数={4:F3}, 中心=({5:F1}px,{6:F1}px), W={7:F3}mm H={8:F3}mm, 面积={9:F0}px, 填充={10:F3}, 距离={11:F1}px",
                 selected,
                 candidate.Rank,
                 candidate.CandidateIndex,

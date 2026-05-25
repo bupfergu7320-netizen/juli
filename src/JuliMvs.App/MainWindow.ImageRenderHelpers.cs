@@ -1,7 +1,6 @@
 using System.Globalization;
 using System.IO;
 using System.Windows;
-using System.Windows.Controls;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using JuliMvs.App.Services;
@@ -103,7 +102,7 @@ public partial class MainWindow
             2);
         Cv2.PutText(
             preview,
-            $"Board center: row 4 col 4, RMS={result.RmsErrorPixels:F3}px",
+            $"Board center row4 col4 RMS={result.RmsErrorPixels:F3}px",
             new OpenCvSharp.Point(24, 266),
             HersheyFonts.HersheySimplex,
             0.75,
@@ -129,4 +128,5 @@ public partial class MainWindow
             2);
         return preview;
     }
+
 }
