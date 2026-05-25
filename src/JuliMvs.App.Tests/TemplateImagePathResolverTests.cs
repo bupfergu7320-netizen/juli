@@ -381,12 +381,15 @@ static void VerifyDirectionFormatterShowsXySigns()
 
     AssertBoolEqual(text.Contains("X方向=取反", StringComparison.Ordinal), true, "formatter X direction");
     AssertBoolEqual(text.Contains("Y方向=取反", StringComparison.Ordinal), true, "formatter Y direction");
-    AssertBoolEqual(text.Contains("R方向=取反", StringComparison.Ordinal), true, "formatter R direction");
+    AssertBoolEqual(text.Contains("R取反", StringComparison.Ordinal), true, "formatter R direction");
+    AssertBoolEqual(text.Contains("D1002", StringComparison.Ordinal), false, "formatter hides output matrix");
 
     var advancedText = TurntableStatusMessageFormatter.FormatDirectionText(
         VisionParameters.Default,
         PlcOutputTransform.Identity with { Xy = 0.25 });
-    AssertBoolEqual(advancedText.Contains("X/Y方向=高级矩阵", StringComparison.Ordinal), true, "formatter advanced XY");
+    AssertBoolEqual(advancedText.Contains("高级矩阵", StringComparison.Ordinal), false, "formatter hides advanced XY text");
+    AssertBoolEqual(advancedText.Contains("X方向=不取反", StringComparison.Ordinal), true, "formatter advanced X fallback");
+    AssertBoolEqual(advancedText.Contains("Y方向=不取反", StringComparison.Ordinal), true, "formatter advanced Y fallback");
 }
 
 static void VerifyProductRecipeClearsLegacyFrontBump()

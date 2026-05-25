@@ -40,14 +40,9 @@ internal static class PlcOutputDirectionSettings
 
     public static string FormatSimpleDirectionText(PlcOutputTransform transform)
     {
-        if (!IsSimpleXyTransform(transform))
-        {
-            return "X/Y\u65b9\u5411=\u9ad8\u7ea7\u77e9\u9635";
-        }
-
         return
-            $"X\u65b9\u5411={(IsSimpleXInverted(transform) ? "\u53d6\u53cd" : "\u4e0d\u53d6\u53cd")}, " +
-            $"Y\u65b9\u5411={(IsSimpleYInverted(transform) ? "\u53d6\u53cd" : "\u4e0d\u53d6\u53cd")}";
+            $"X\u65b9\u5411={(transform.Xx < 0.0 ? "\u53d6\u53cd" : "\u4e0d\u53d6\u53cd")}, " +
+            $"Y\u65b9\u5411={(transform.Yy < 0.0 ? "\u53d6\u53cd" : "\u4e0d\u53d6\u53cd")}";
     }
 
     private static bool IsSimpleAxisTransform(double mainCoefficient, double crossCoefficient, double bias)
