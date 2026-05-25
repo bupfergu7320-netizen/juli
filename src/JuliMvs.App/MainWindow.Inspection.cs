@@ -222,7 +222,7 @@ public partial class MainWindow
 
         ProductionSummaryText.Text = $"型号: {FormatSummaryValue(productName)}";
         ProductionBatchText.Text = $"批次: {FormatSummaryValue(batchNo)}";
-        ProductionCountText.Text = $"计件: 总{_productionTotalCount}  OK{_productionOkCount}  NG{_productionNgCount}";
+        ProductionCountText.Text = $"总量: {_productionTotalCount}";
     }
 
     private static string FormatSummaryValue(string? value)
@@ -458,7 +458,24 @@ public partial class MainWindow
             return "OK";
         }
 
-        return result.NgReason.ToString();
+        return result.NgReason switch
+        {
+            NgReason.MatchFailed => "未找到工件",
+            NgReason.SizeOutOfTolerance => "尺寸超差",
+            NgReason.ShapeOutOfTolerance => "形状不符",
+            NgReason.HoleOutOfTolerance => "孔位超差",
+            NgReason.CameraError => "相机异常",
+            NgReason.PlcError => "PLC异常",
+            NgReason.AlgorithmError => "算法异常",
+            NgReason.BackSideDetected => "反面",
+            NgReason.FrontBumpMissing => "正面特征缺失",
+            _ => result.NgReason.ToString()
+        };
+    }
+
+    private static bool ShouldShowOnRuntimePanel(string line)
+    {
+        return IsRuntimeNgLine(line);
     }
 
     private static string FormatRuntimeXyrLine(InspectionResult result)
@@ -493,7 +510,10 @@ public partial class MainWindow
         {
             var line = lines[index];
             _fileLogger.Write(line);
-            LogList.Items.Insert(0, CreateRuntimeLogLine(line));
+            if (ShouldShowOnRuntimePanel(line))
+            {
+                LogList.Items.Insert(0, CreateRuntimeLogLine(line));
+            }
         }
 
         while (LogList.Items.Count > 80)
@@ -504,7 +524,7 @@ public partial class MainWindow
 
     private static RuntimeLogLine CreateRuntimeLogLine(string line)
     {
-        var displayText = $"{DateTime.Now:HH:mm:ss} {line}";
+        var displayText = $"{DateTime.Now:HH:mm:ss} {FormatRuntimePanelLine(line)}";
         if (IsRuntimeNgLine(line))
         {
             return new RuntimeLogLine(displayText, Brushes.Red, FontWeights.Bold);
@@ -516,6 +536,21 @@ public partial class MainWindow
         }
 
         return new RuntimeLogLine(displayText, Brushes.Black, FontWeights.Normal);
+    }
+
+    private static string FormatRuntimePanelLine(string line)
+    {
+        if (!line.StartsWith("结果:", StringComparison.Ordinal))
+        {
+            return line;
+        }
+
+        var reasonIndex = line.IndexOf("原因:", StringComparison.Ordinal);
+        var reason = reasonIndex >= 0
+            ? line[(reasonIndex + "原因:".Length)..].Trim()
+            : line;
+
+        return $"NG  NG原因: {reason}";
     }
 
     private static bool IsRuntimeOkLine(string line)
