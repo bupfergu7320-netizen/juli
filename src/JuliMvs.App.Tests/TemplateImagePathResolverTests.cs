@@ -25,6 +25,7 @@ VerifyProductRecipeKeepsBackSideNgPerProduct();
 VerifyProductRecipeClearsLegacyFrontBump();
 VerifyBackSideNgDoesNotRequireSelectedFrontBump();
 VerifyPlcOutputDirectionSettingsApplySimpleXySigns();
+VerifyPlcOutputDirectionSettingsApplyXySwap();
 VerifyDirectionFormatterShowsXySigns();
 VerifyProductTemplateNameIsUniqueAndRebuildOverwrites();
 VerifyLegacyDuplicateProductTemplatesKeepNewest();
@@ -374,16 +375,59 @@ static void VerifyPlcOutputDirectionSettingsApplySimpleXySigns()
     AssertBoolEqual(false, PlcOutputDirectionSettings.IsSimpleXyTransform(advanced), "advanced matrix is not simple XY");
 }
 
+static void VerifyPlcOutputDirectionSettingsApplyXySwap()
+{
+    var transform = PlcOutputTransform.Identity with
+    {
+        RScale = 1.5,
+        RBias = 2.0
+    };
+
+    var swapped = PlcOutputDirectionSettings.ApplySimpleXyDirection(
+        transform,
+        invertX: false,
+        invertY: false,
+        swapXy: true);
+
+    AssertDoubleEqual(0.0, swapped.Xx, "swap Xx");
+    AssertDoubleEqual(1.0, swapped.Xy, "swap Xy");
+    AssertDoubleEqual(1.0, swapped.Yx, "swap Yx");
+    AssertDoubleEqual(0.0, swapped.Yy, "swap Yy");
+    AssertDoubleEqual(1.5, swapped.RScale, "swap keeps RScale");
+    AssertDoubleEqual(2.0, swapped.RBias, "swap keeps RBias");
+    AssertBoolEqual(true, PlcOutputDirectionSettings.IsSimpleXySwapped(swapped), "swap detected");
+    AssertBoolEqual(false, PlcOutputDirectionSettings.IsSimpleXInverted(swapped), "swapped X not inverted");
+    AssertBoolEqual(false, PlcOutputDirectionSettings.IsSimpleYInverted(swapped), "swapped Y not inverted");
+
+    var swappedWithSigns = PlcOutputDirectionSettings.ApplySimpleXyDirection(
+        transform,
+        invertX: true,
+        invertY: false,
+        swapXy: true);
+    AssertDoubleEqual(0.0, swappedWithSigns.Xx, "swap sign Xx");
+    AssertDoubleEqual(1.0, swappedWithSigns.Xy, "swap sign Xy");
+    AssertDoubleEqual(-1.0, swappedWithSigns.Yx, "swap sign Yx");
+    AssertDoubleEqual(0.0, swappedWithSigns.Yy, "swap sign Yy");
+    AssertBoolEqual(true, PlcOutputDirectionSettings.IsSimpleXInverted(swappedWithSigns), "swapped X inverted");
+    AssertBoolEqual(false, PlcOutputDirectionSettings.IsSimpleYInverted(swappedWithSigns), "swapped Y not inverted");
+}
+
 static void VerifyDirectionFormatterShowsXySigns()
 {
     var text = TurntableStatusMessageFormatter.FormatDirectionText(
         VisionParameters.Default with { InvertRotationCompensation = true },
         PlcOutputTransform.Identity with { Xx = -1.0, Yy = -1.0 });
 
+    AssertBoolEqual(text.Contains("X/Y输出=不交换", StringComparison.Ordinal), true, "formatter XY not swapped");
     AssertBoolEqual(text.Contains("X方向=取反", StringComparison.Ordinal), true, "formatter X direction");
     AssertBoolEqual(text.Contains("Y方向=取反", StringComparison.Ordinal), true, "formatter Y direction");
     AssertBoolEqual(text.Contains("R取反", StringComparison.Ordinal), true, "formatter R direction");
     AssertBoolEqual(text.Contains("D1002", StringComparison.Ordinal), false, "formatter hides output matrix");
+
+    var swappedText = TurntableStatusMessageFormatter.FormatDirectionText(
+        VisionParameters.Default,
+        PlcOutputTransform.Identity with { Xx = 0.0, Xy = 1.0, Yx = 1.0, Yy = 0.0 });
+    AssertBoolEqual(swappedText.Contains("X/Y输出=交换", StringComparison.Ordinal), true, "formatter XY swapped");
 
     var advancedText = TurntableStatusMessageFormatter.FormatDirectionText(
         VisionParameters.Default,
