@@ -527,7 +527,7 @@ public partial class MainWindow
 
     private static bool ShouldShowOnRuntimePanel(string line)
     {
-        return IsRuntimeNgLine(line);
+        return IsRuntimeNgLine(line) || IsRuntimeXyrLine(line);
     }
 
     private static string FormatRuntimeXyrLine(InspectionResult result)
@@ -616,6 +616,11 @@ public partial class MainWindow
         return line.StartsWith("结果:", StringComparison.Ordinal)
             && (line.IndexOf("NG", StringComparison.OrdinalIgnoreCase) >= 0
                 || line.IndexOf("ERROR", StringComparison.OrdinalIgnoreCase) >= 0);
+    }
+
+    private static bool IsRuntimeXyrLine(string line)
+    {
+        return line.StartsWith("XYR:", StringComparison.Ordinal);
     }
 
     private PlcOutputCommand CalculatePlcOutputCommand(InspectionMeasurement measurement)

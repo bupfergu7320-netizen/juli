@@ -330,7 +330,7 @@
                                        TextWrapping="Wrap" />
                         </Grid>
                         <TextBlock Grid.Row="2"
-                                   Text="NG / NG原因"
+                                   Text="NG / NG原因 / XYR"
                                    FontSize="24"
                                    FontWeight="Bold"
                                    Foreground="#005A9E"
