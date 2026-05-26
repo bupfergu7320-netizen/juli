@@ -49,6 +49,22 @@ public static class RAxisCenterCalibrationSolver
         };
     }
 
+    public static IReadOnlyList<RAxisCenterCalibrationResidual> CalculateResiduals(
+        RAxisCenterCalibration calibration)
+    {
+        ArgumentNullException.ThrowIfNull(calibration);
+
+        if (calibration.Points.Count < 3)
+        {
+            return [];
+        }
+
+        var parameters = FitRotationModel(calibration.Points, calibration.GetMachineAngleDirection());
+        return CalculateResiduals(calibration.Points, parameters)
+            .OrderBy(residual => residual.AngleDegrees)
+            .ToArray();
+    }
+
     private static void EnsureNonCollinear(IReadOnlyList<RAxisCenterCalibrationPoint> points)
     {
         var maxArea = 0.0;
@@ -123,6 +139,20 @@ public static class RAxisCenterCalibrationSolver
     {
         var sumSquared = 0.0;
         var max = 0.0;
+        foreach (var residual in CalculateResiduals(points, parameters))
+        {
+            sumSquared += residual.DistanceMm * residual.DistanceMm;
+            max = Math.Max(max, residual.DistanceMm);
+        }
+
+        return (Math.Sqrt(sumSquared / points.Count), max);
+    }
+
+    private static IReadOnlyList<RAxisCenterCalibrationResidual> CalculateResiduals(
+        IReadOnlyList<RAxisCenterCalibrationPoint> points,
+        RotationParameters parameters)
+    {
+        var residuals = new List<RAxisCenterCalibrationResidual>(points.Count);
         foreach (var point in points)
         {
             var radians = parameters.AngleDirection * point.AngleDegrees * Math.PI / 180.0;
@@ -132,12 +162,19 @@ public static class RAxisCenterCalibrationSolver
             var predictedY = parameters.CenterY + sin * parameters.RadiusX + cos * parameters.RadiusY;
             var dx = point.ObservedCenterXMm - predictedX;
             var dy = point.ObservedCenterYMm - predictedY;
-            var residual = Math.Sqrt(dx * dx + dy * dy);
-            sumSquared += residual * residual;
-            max = Math.Max(max, residual);
+            var distance = Math.Sqrt(dx * dx + dy * dy);
+            residuals.Add(new RAxisCenterCalibrationResidual(
+                point.AngleDegrees,
+                point.ObservedCenterXMm,
+                point.ObservedCenterYMm,
+                predictedX,
+                predictedY,
+                dx,
+                dy,
+                distance));
         }
 
-        return (Math.Sqrt(sumSquared / points.Count), max);
+        return residuals;
     }
 
     private static double[] Solve4x4(double[,] matrix, double[] vector)
@@ -214,3 +251,13 @@ public static class RAxisCenterCalibrationSolver
 
     private sealed record RotationFit(RotationParameters Parameters, double Rms, double Max);
 }
+
+public sealed record RAxisCenterCalibrationResidual(
+    double AngleDegrees,
+    double ObservedXMm,
+    double ObservedYMm,
+    double PredictedXMm,
+    double PredictedYMm,
+    double ErrorXMm,
+    double ErrorYMm,
+    double DistanceMm);

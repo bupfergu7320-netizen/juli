@@ -161,6 +161,19 @@ internal sealed class CalibrationQualityEvaluator
                 _thresholds.MaximumRAxisCenterMaxMm));
         }
 
+        var residuals = RAxisCenterCalibrationSolver.CalculateResiduals(calibration);
+        if (residuals.Count > 0)
+        {
+            var worst = residuals.OrderByDescending(residual => residual.DistanceMm).First();
+            if (worst.DistanceMm > _thresholds.MaximumRAxisCenterMaxMm)
+            {
+                issues.Add(Format(
+                    "\u6700\u5927\u8bef\u5dee\u5728R{0:0.###}\u00b0\uff0c\u8bef\u5dee={1:F4}mm\uff0c\u5efa\u8bae\u4f18\u5148\u91cd\u62cd\u8be5\u89d2\u5ea6\u3002",
+                    worst.AngleDegrees,
+                    worst.DistanceMm));
+            }
+        }
+
         return BuildResult(
             "R\u8f74\u4e2d\u5fc3\u8d28\u91cf",
             issues,

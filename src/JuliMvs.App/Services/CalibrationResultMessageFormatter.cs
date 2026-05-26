@@ -82,16 +82,44 @@ internal static class CalibrationResultMessageFormatter
 
     public static string FormatRAxisCenterResult(RAxisCenterCalibration calibration)
     {
-        return string.Format(
-            CultureInfo.InvariantCulture,
-            "\u6807\u5b9a\u7ed3\u679c: \u4e2d\u5fc3X={0:F4}mm, \u4e2d\u5fc3Y={1:F4}mm{5}\u534a\u5f84={2:F4}mm, RMS={3:F4}mm, Max={4:F4}mm, \u70b9\u6570={6}{5}\u5efa\u8bae: RMS <= 0.0500mm \u4e3a\u7cbe\u5bc6\u53c2\u8003\uff0cMax\u4e0d\u5e94\u660e\u663e\u5927\u4e8eRMS\uff1b\u504f\u5927\u65f6\u4f18\u5148\u68c0\u67e5\u5b9e\u9645R\u89d2\u5ea6\u3001\u6807\u51c6\u4ef6\u6ed1\u52a8\u548c\u4e2d\u5fc3\u8bc6\u522b\u3002",
-            calibration.CenterXMm,
-            calibration.CenterYMm,
-            calibration.RadiusMm,
-            calibration.RmsErrorMm,
-            calibration.MaxErrorMm,
+        var residuals = RAxisCenterCalibrationSolver.CalculateResiduals(calibration);
+        var worst = residuals
+            .OrderByDescending(residual => residual.DistanceMm)
+            .FirstOrDefault();
+        var worstText = worst is null
+            ? "\u6700\u5927\u8bef\u5dee: \u6682\u65e0\u660e\u7ec6"
+            : string.Format(
+                CultureInfo.InvariantCulture,
+                "\u6700\u5927\u8bef\u5dee: R{0:0.###}\u00b0 = {1:F4}mm",
+                worst.AngleDegrees,
+                worst.DistanceMm);
+        var residualText = residuals.Count == 0
+            ? "\u5404\u89d2\u5ea6\u8bef\u5dee: \u6682\u65e0\u660e\u7ec6"
+            : "\u5404\u89d2\u5ea6\u8bef\u5dee: " + string.Join(
+                "\uff1b",
+                residuals.Select(residual => string.Format(
+                    CultureInfo.InvariantCulture,
+                    "R{0:0.###}\u00b0 {1:F4}mm",
+                    residual.AngleDegrees,
+                    residual.DistanceMm)));
+
+        return string.Join(
             Environment.NewLine,
-            calibration.Points.Count);
+            string.Format(
+                CultureInfo.InvariantCulture,
+                "\u6807\u5b9a\u7ed3\u679c: \u4e2d\u5fc3X={0:F4}mm, \u4e2d\u5fc3Y={1:F4}mm",
+                calibration.CenterXMm,
+                calibration.CenterYMm),
+            string.Format(
+                CultureInfo.InvariantCulture,
+                "\u534a\u5f84={0:F4}mm, RMS={1:F4}mm, Max={2:F4}mm, \u70b9\u6570={3}",
+                calibration.RadiusMm,
+                calibration.RmsErrorMm,
+                calibration.MaxErrorMm,
+                calibration.Points.Count),
+            worstText,
+            residualText,
+            "\u5efa\u8bae: RMS <= 0.0500mm \u4e3a\u7cbe\u5bc6\u53c2\u8003\uff1b\u67d0\u4e2aR\u89d2\u5ea6\u8bef\u5dee\u660e\u663e\u504f\u5927\u65f6\uff0c\u5148\u91cd\u62cd\u8be5\u89d2\u5ea6\uff0c\u518d\u68c0\u67e5R\u8f74\u5230\u4f4d\u7b49\u5f85\u3001\u6807\u5b9a\u677f\u56fa\u5b9a\u548c\u4e2d\u5fc3\u8bc6\u522b\u3002");
     }
 
     public static string FormatCalibrationPointSuggestion(double suggestedMachineXMm, double suggestedMachineYMm)

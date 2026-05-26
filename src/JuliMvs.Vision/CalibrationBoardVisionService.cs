@@ -1,3 +1,4 @@
+using System.Globalization;
 using OpenCvSharp;
 
 namespace JuliMvs.Vision;
@@ -708,21 +709,20 @@ public sealed class CalibrationBoardVisionService
             for (var column = 0; column < grid[row].Count; column++)
             {
                 var point = ToPoint(grid[row][column]);
-                Cv2.Circle(preview, point, 8, Scalar.LimeGreen, 2);
-                Cv2.DrawMarker(preview, point, Scalar.Yellow, MarkerTypes.Cross, 18, 2);
                 if (column < grid[row].Count - 1)
                 {
-                    Cv2.Line(preview, point, ToPoint(grid[row][column + 1]), new Scalar(255, 191, 0), 2);
+                    Cv2.Line(preview, point, ToPoint(grid[row][column + 1]), new Scalar(255, 191, 0), 4, LineTypes.AntiAlias);
                 }
 
                 if (row < grid.Count - 1)
                 {
-                    Cv2.Line(preview, point, ToPoint(grid[row + 1][column]), new Scalar(255, 191, 0), 2);
+                    Cv2.Line(preview, point, ToPoint(grid[row + 1][column]), new Scalar(0, 220, 255), 4, LineTypes.AntiAlias);
                 }
             }
         }
 
         DrawRotatedGridOutline(preview, grid);
+        DrawGridPointMarkers(preview, grid);
 
         var textLines = new[]
         {
@@ -745,6 +745,32 @@ public sealed class CalibrationBoardVisionService
         }
 
         return preview;
+    }
+
+    private static void DrawGridPointMarkers(Mat preview, IReadOnlyList<IReadOnlyList<Point2d>> grid)
+    {
+        for (var row = 0; row < grid.Count; row++)
+        {
+            for (var column = 0; column < grid[row].Count; column++)
+            {
+                var point = ToPoint(grid[row][column]);
+                var pointNumber = row * grid[row].Count + column + 1;
+                var isCenter = row == grid.Count / 2 && column == grid[row].Count / 2;
+                var markerColor = isCenter ? Scalar.Red : Scalar.LimeGreen;
+                var textColor = isCenter ? Scalar.Red : Scalar.White;
+                Cv2.Circle(preview, point, isCenter ? 18 : 10, markerColor, isCenter ? 4 : 3, LineTypes.AntiAlias);
+                Cv2.DrawMarker(preview, point, Scalar.Yellow, MarkerTypes.Cross, isCenter ? 30 : 20, 2);
+                Cv2.PutText(
+                    preview,
+                    pointNumber.ToString(CultureInfo.InvariantCulture),
+                    new Point(point.X + 10, point.Y - 10),
+                    HersheyFonts.HersheySimplex,
+                    isCenter ? 0.72 : 0.52,
+                    textColor,
+                    isCenter ? 3 : 2,
+                    LineTypes.AntiAlias);
+            }
+        }
     }
 
     private static void DrawRotatedGridOutline(Mat preview, IReadOnlyList<IReadOnlyList<Point2d>> grid)

@@ -30,6 +30,7 @@ VerifyProductTemplateNameIsUniqueAndRebuildOverwrites();
 VerifyLegacyDuplicateProductTemplatesKeepNewest();
 VerifyTemplateSelectionTextShowsOnlyNameAndTime();
 VerifyCalibrationBoardDetectionPrefersLowestRmsGrid();
+VerifyRAxisCenterResidualsIdentifyWorstAngle();
 
 Console.WriteLine("App services keep template images portable, local settings backward-compatible, production image saving limited, and calibration clearing safe.");
 
@@ -649,6 +650,26 @@ static void VerifyCalibrationBoardDetectionPrefersLowestRmsGrid()
     AssertBoolEqual(result.XyDifferencePercent < 0.001, true, "calibration board XY difference");
     AssertDoubleEqual(205, result.Points[0].X, "top-left calibration X");
     AssertDoubleEqual(150, result.Points[0].Y, "top-left calibration Y");
+}
+
+static void VerifyRAxisCenterResidualsIdentifyWorstAngle()
+{
+    var points = new[]
+    {
+        new RAxisCenterCalibrationPoint(0, 0, 0, 10.0, 0.0),
+        new RAxisCenterCalibrationPoint(90, 0, 0, 0.0, 10.0),
+        new RAxisCenterCalibrationPoint(180, 0, 0, -10.0, 0.0),
+        new RAxisCenterCalibrationPoint(270, 0, 0, 0.0, -11.0)
+    };
+    var calibration = RAxisCenterCalibrationSolver.Solve(points);
+    var residuals = RAxisCenterCalibrationSolver.CalculateResiduals(calibration);
+    var worst = residuals.OrderByDescending(residual => residual.DistanceMm).First();
+    var resultText = CalibrationResultMessageFormatter.FormatRAxisCenterResult(calibration);
+
+    AssertIntEqual(4, residuals.Count, "R-axis residual count");
+    AssertDoubleEqual(270.0, worst.AngleDegrees, "worst R-axis angle");
+    AssertBoolEqual(true, resultText.Contains("R270", StringComparison.Ordinal), "R-axis result includes worst angle");
+    AssertBoolEqual(true, resultText.Contains("各角度误差", StringComparison.Ordinal), "R-axis result includes per-angle residuals");
 }
 
 static string CreateTempDirectory()
