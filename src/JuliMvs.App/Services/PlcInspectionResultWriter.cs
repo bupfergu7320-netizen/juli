@@ -45,41 +45,14 @@ internal sealed class PlcInspectionResultWriter
                 $"PLC偏差输出坐标系 {outputTransformText}, " +
                 "D1010=1.");
             var readbackAfterWrite = await LogPlcOutputReadbackAsync(client, log);
-            log("PLC结果已交接：上位机写入D1010后将清D1000=0。");
-            return await ClearTriggerAndBuildOutcomeAsync(client, readbackAfterWrite, log);
+            log("PLC结果已交接：D1010=1已写入；D1000已在拍照完成后清零。");
+            return PlcInspectionResultWriteOutcome.WriteCompleted(readbackAfterWrite, readbackAfterWrite);
         }
 
         log("PLC写入完成：D1010=2。");
         var ngReadbackAfterWrite = await LogPlcOutputReadbackAsync(client, log);
-        log("PLC结果已交接：上位机写入D1010后将清D1000=0。");
-        return await ClearTriggerAndBuildOutcomeAsync(client, ngReadbackAfterWrite, log);
-    }
-
-    private static async Task<PlcInspectionResultWriteOutcome> ClearTriggerAndBuildOutcomeAsync(
-        MitsubishiModbusTcpPlcClient client,
-        PlcOutputReadback? readbackAfterWrite,
-        Action<string> log)
-    {
-        try
-        {
-            await client.ClearTriggerAsync();
-            log("上位机已清PLC触发位：D1000=0。");
-            var readbackAfterClear = await LogPlcOutputReadbackAsync(client, log);
-
-            if (readbackAfterClear?.Trigger == 0)
-            {
-                log("PLC触发位清除确认：D1000=0；标准握手完成，允许下一次触发。");
-                return PlcInspectionResultWriteOutcome.Cleared(readbackAfterWrite, readbackAfterClear);
-            }
-
-            log($"PLC触发位清除后读回异常：D1000={readbackAfterClear?.Trigger.ToString(CultureInfo.InvariantCulture) ?? "未知"}。");
-            return PlcInspectionResultWriteOutcome.WriteCompleted(readbackAfterWrite, readbackAfterClear);
-        }
-        catch (Exception ex)
-        {
-            log($"上位机清D1000失败：{ex.Message}");
-            throw;
-        }
+        log("PLC结果已交接：D1010=2已写入；D1000已在拍照完成后清零。");
+        return PlcInspectionResultWriteOutcome.WriteCompleted(ngReadbackAfterWrite, ngReadbackAfterWrite);
     }
 
     private static async Task<PlcOutputReadback?> LogPlcOutputReadbackAsync(
@@ -116,18 +89,14 @@ internal sealed class PlcInspectionResultWriter
 
 internal sealed record PlcInspectionResultWriteOutcome(
     bool IsConnected,
-    bool TriggerCleared,
     bool ShouldSetPlcStatusNormal,
-    bool ShouldSetPlcStatusWaitingReset,
     PlcOutputReadback? ReadbackAfterWrite,
     PlcOutputReadback? LastReadbackBeforeReturn)
 {
     public static PlcInspectionResultWriteOutcome NotConnected { get; } =
         new(
             IsConnected: false,
-            TriggerCleared: false,
             ShouldSetPlcStatusNormal: false,
-            ShouldSetPlcStatusWaitingReset: false,
             ReadbackAfterWrite: null,
             LastReadbackBeforeReturn: null);
 
@@ -137,35 +106,7 @@ internal sealed record PlcInspectionResultWriteOutcome(
     {
         return new(
             IsConnected: true,
-            TriggerCleared: false,
-            ShouldSetPlcStatusNormal: false,
-            ShouldSetPlcStatusWaitingReset: false,
-            readbackAfterWrite,
-            lastReadbackBeforeReturn);
-    }
-
-    public static PlcInspectionResultWriteOutcome Cleared(
-        PlcOutputReadback? readbackAfterWrite,
-        PlcOutputReadback? lastReadbackBeforeReturn)
-    {
-        return new(
-            IsConnected: true,
-            TriggerCleared: true,
             ShouldSetPlcStatusNormal: true,
-            ShouldSetPlcStatusWaitingReset: false,
-            readbackAfterWrite,
-            lastReadbackBeforeReturn);
-    }
-
-    public static PlcInspectionResultWriteOutcome WaitingForReset(
-        PlcOutputReadback? readbackAfterWrite,
-        PlcOutputReadback? lastReadbackBeforeReturn)
-    {
-        return new(
-            IsConnected: true,
-            TriggerCleared: false,
-            ShouldSetPlcStatusNormal: false,
-            ShouldSetPlcStatusWaitingReset: true,
             readbackAfterWrite,
             lastReadbackBeforeReturn);
     }

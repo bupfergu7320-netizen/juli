@@ -29,6 +29,7 @@ VerifyDirectionFormatterShowsXySigns();
 VerifyProductTemplateNameIsUniqueAndRebuildOverwrites();
 VerifyLegacyDuplicateProductTemplatesKeepNewest();
 VerifyTemplateSelectionTextShowsOnlyNameAndTime();
+VerifyPlcTriggerGateTreatsD1000HighAsSingleCapture();
 VerifyCalibrationBoardDetectionPrefersLowestRmsGrid();
 VerifyRAxisCenterResidualsIdentifyWorstAngle();
 
@@ -511,6 +512,30 @@ static void VerifyTemplateSelectionTextShowsOnlyNameAndTime()
 
     AssertEqual("PART-A  2026-05-25 13:44", text, "template selection text");
     AssertBoolEqual(text.Contains("R=", StringComparison.Ordinal), false, "template selection hides R");
+}
+
+static void VerifyPlcTriggerGateTreatsD1000HighAsSingleCapture()
+{
+    var gate = new PlcTriggerGate();
+
+    AssertEqual(
+        PlcTriggerDecision.StartInspection.ToString(),
+        gate.Evaluate(captureRequested: true).ToString(),
+        "first D1000 high starts inspection");
+    gate.EndOperation();
+
+    AssertEqual(
+        PlcTriggerDecision.Busy.ToString(),
+        gate.Evaluate(captureRequested: true).ToString(),
+        "held D1000 high is not a second inspection");
+    AssertEqual(
+        PlcTriggerDecision.Cleared.ToString(),
+        gate.Evaluate(captureRequested: false).ToString(),
+        "D1000 low releases latch");
+    AssertEqual(
+        PlcTriggerDecision.StartInspection.ToString(),
+        gate.Evaluate(captureRequested: true).ToString(),
+        "next D1000 high starts next inspection");
 }
 
 static PartTemplate CreateTemplate(

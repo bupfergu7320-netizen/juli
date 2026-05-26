@@ -31,6 +31,7 @@ public partial class MainWindow
         Log("收到PLC定位触发D1000=1");
         var requestStopwatch = Stopwatch.StartNew();
         var captureElapsedMilliseconds = 0L;
+        var triggerClearedAfterCapture = false;
 
         try
         {
@@ -53,6 +54,8 @@ public partial class MainWindow
             var rawImagePath = await CaptureCameraImageAsync(saveImage: false);
             captureStopwatch.Stop();
             captureElapsedMilliseconds = captureStopwatch.ElapsedMilliseconds;
+            await ClearPlcTriggerAfterCaptureAsync();
+            triggerClearedAfterCapture = true;
             await InspectAndPersistAsync(
                 _lastCameraImage!,
                 rawImagePath,
@@ -68,7 +71,17 @@ public partial class MainWindow
                 $"结果: Error  原因: {ex.Message}",
                 $"耗时: 总{requestStopwatch.ElapsedMilliseconds}ms  拍照{captureElapsedMilliseconds}ms",
                 "XYR: 无有效测量值");
-            await WritePlcErrorResultAsync($"PLC触发检测异常: {ex.Message}", NgReason.AlgorithmError);
+            try
+            {
+                await WritePlcErrorResultAsync($"PLC触发检测异常: {ex.Message}", NgReason.AlgorithmError);
+            }
+            finally
+            {
+                if (!triggerClearedAfterCapture)
+                {
+                    await ClearPlcTriggerAfterFailedRequestAsync();
+                }
+            }
         }
         finally
         {
@@ -95,6 +108,48 @@ public partial class MainWindow
         }
     }
 
+    private async Task ClearPlcTriggerAfterCaptureAsync()
+    {
+        var client = _plcClient;
+        if (client is null || !client.IsConnected)
+        {
+            Log("拍照已完成，但PLC未连接，无法清D1000=0。");
+            return;
+        }
+
+        try
+        {
+            await client.ClearTriggerAsync();
+            Log("拍照已完成，上位机已清D1000=0，随后继续检测并写D1010结果。");
+        }
+        catch (Exception ex)
+        {
+            Log($"拍照已完成，但上位机清D1000失败: {ex.Message}");
+            throw;
+        }
+    }
+
+    private async Task ClearPlcTriggerAfterFailedRequestAsync()
+    {
+        var client = _plcClient;
+        if (client is null || !client.IsConnected)
+        {
+            Log("PLC触发处理失败，但PLC未连接，无法清D1000=0。");
+            return;
+        }
+
+        try
+        {
+            await client.ClearTriggerAsync();
+            Log("PLC触发处理失败，D1010错误结果已写入，上位机已清D1000=0。");
+        }
+        catch (Exception ex)
+        {
+            Log($"PLC触发处理失败，但上位机清D1000失败: {ex.Message}");
+            throw;
+        }
+    }
+
     private async Task HandlePlcCaptureRequestValidationFailureAsync(PlcCaptureRequestDecision validation)
     {
         var messages = PlcCaptureRequestMessageFormatter.Format(validation.Reason);
@@ -110,9 +165,16 @@ public partial class MainWindow
 
         if (validation.Action == PlcCaptureRequestAction.WritePlcError)
         {
-            await WritePlcErrorResultAsync(
-                messages.PlcErrorMessage ?? "\u0050\u004c\u0043\u89e6\u53d1\u68c0\u6d4b\u5931\u8d25\u3002",
-                validation.NgReason ?? NgReason.PlcError);
+            try
+            {
+                await WritePlcErrorResultAsync(
+                    messages.PlcErrorMessage ?? "\u0050\u004c\u0043\u89e6\u53d1\u68c0\u6d4b\u5931\u8d25\u3002",
+                    validation.NgReason ?? NgReason.PlcError);
+            }
+            finally
+            {
+                await ClearPlcTriggerAfterFailedRequestAsync();
+            }
         }
         else if (validation.Action == PlcCaptureRequestAction.Ignore)
         {
@@ -360,19 +422,9 @@ public partial class MainWindow
                 InspectionDiagnosticMessageFormatter.FormatPlcOutputTransform(GetEffectivePlcOutputTransform()),
                 Log);
             SavePassivePlcVerificationReport(result, outcome);
-            if (outcome.TriggerCleared)
-            {
-                _plcTriggerGate.MarkTriggerCleared();
-            }
-
             if (outcome.ShouldSetPlcStatusNormal)
             {
                 SetPlcStatus("PLC通讯正常", isNormal: true);
-            }
-
-            if (outcome.ShouldSetPlcStatusWaitingReset)
-            {
-                SetPlcStatus("PLC等待复位", isNormal: false);
             }
         }
         catch (Exception ex)
