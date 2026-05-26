@@ -9,12 +9,12 @@ public partial class MainWindow
 {
     private void OpenCompensationDirectionDialog(Action? onSaved = null)
     {
-        if (!RequireTechnician("PLC输出方向设置"))
+        if (!RequireTechnician("PLC方向取反设置"))
         {
             return;
         }
 
-        var dialog = CreateToolDialog("PLC输出方向设置", 700, 520);
+        var dialog = CreateToolDialog("PLC方向取反设置", 620, 430);
         dialog.ResizeMode = ResizeMode.NoResize;
 
         var root = new Grid { Margin = new Thickness(42, 34, 42, 30) };
@@ -36,14 +36,11 @@ public partial class MainWindow
 
         var initialInvertX = PlcOutputDirectionSettings.IsSimpleXInverted(_plcOutputTransform);
         var initialInvertY = PlcOutputDirectionSettings.IsSimpleYInverted(_plcOutputTransform);
-        var initialSwapXy = PlcOutputDirectionSettings.IsSimpleXySwapped(_plcOutputTransform);
-        var swapXyCheckBox = CreateDirectionCheckBox("X/Y输出交换", initialSwapXy);
         var invertXCheckBox = CreateDirectionCheckBox("X方向取反", initialInvertX);
         var invertYCheckBox = CreateDirectionCheckBox("Y方向取反", initialInvertY);
         var invertRCheckBox = CreateDirectionCheckBox("R方向取反", _visionParameters.InvertRotationCompensation);
 
         var directionPanel = new StackPanel { Margin = new Thickness(0, 8, 0, 0) };
-        directionPanel.Children.Add(swapXyCheckBox);
         directionPanel.Children.Add(invertXCheckBox);
         directionPanel.Children.Add(invertYCheckBox);
         directionPanel.Children.Add(invertRCheckBox);
@@ -60,12 +57,10 @@ public partial class MainWindow
             {
                 var invertX = invertXCheckBox.IsChecked == true;
                 var invertY = invertYCheckBox.IsChecked == true;
-                var swapXy = swapXyCheckBox.IsChecked == true;
                 var transform = PlcOutputDirectionSettings.ApplySimpleXyDirection(
                     _plcOutputTransform,
                     invertX,
-                    invertY,
-                    swapXy);
+                    invertY);
                 var reconnectPlc = _plcClient?.IsConnected == true;
 
                 await SaveMachineCompensationDirectionsAsync(
@@ -77,9 +72,9 @@ public partial class MainWindow
                 currentText.Text = TurntableStatusMessageFormatter.FormatDirectionText(
                     _visionParameters,
                     GetEffectivePlcOutputTransform());
-                MessageText.Text = "PLC输出方向设置已保存。";
+                MessageText.Text = "PLC方向取反设置已保存。";
                 Log(
-                    "PLC输出方向设置已保存: " +
+                    "PLC方向取反设置已保存: " +
                     TurntableStatusMessageFormatter.FormatDirectionText(
                         _visionParameters,
                         GetEffectivePlcOutputTransform()));
@@ -87,7 +82,7 @@ public partial class MainWindow
                 if (reconnectPlc)
                 {
                     await ConnectPlcAsync();
-                    Log("PLC已按新的输出方向设置重新连接。");
+                    Log("PLC已按新的方向取反设置重新连接。");
                 }
 
                 onSaved?.Invoke();
@@ -95,9 +90,9 @@ public partial class MainWindow
             }
             catch (Exception ex)
             {
-                MessageText.Text = $"PLC输出方向设置保存失败: {ex.Message}";
+                MessageText.Text = $"PLC方向取反设置保存失败: {ex.Message}";
                 Log(MessageText.Text);
-                MessageBox.Show(ex.Message, "PLC输出方向设置", MessageBoxButton.OK, MessageBoxImage.Warning);
+                MessageBox.Show(ex.Message, "PLC方向取反设置", MessageBoxButton.OK, MessageBoxImage.Warning);
             }
         }, 0);
         saveButton.Width = double.NaN;

@@ -7,7 +7,6 @@ VerifyRCommandDirectionIsCoupledIntoXyCompensation();
 VerifyLegacyRAxisCalibrationDirectionIsInferred();
 VerifyPlcOutputUsesFinalCorrectionMeasurement();
 VerifyXyOutputSignsDoNotChangeR();
-VerifyXyOutputSwapRoutesFinalCorrectionChannels();
 
 Console.WriteLine("PLC final correction output uses R-axis center, machine R direction, and XCompensation/YCompensation/RotationCompensation.");
 
@@ -171,38 +170,6 @@ static void VerifyXyOutputSignsDoNotChangeR()
     AssertEqual(-12.34, invertedBoth.XDeviation, "invertedBoth.XDeviation");
     AssertEqual(56.78, invertedBoth.YDeviation, "invertedBoth.YDeviation");
     AssertEqual(9.87, invertedBoth.RDeviation, "invertedBoth.RDeviation");
-}
-
-static void VerifyXyOutputSwapRoutesFinalCorrectionChannels()
-{
-    var measurement = new InspectionMeasurement(
-        CenterXPixel: 0,
-        CenterYPixel: 0,
-        XOffsetMm: 0,
-        YOffsetMm: 0,
-        XCompensationMm: 12.34,
-        YCompensationMm: -56.78,
-        AngleDegrees: 0,
-        AngleOffsetDegrees: 0,
-        RotationCompensationDegrees: 9.87,
-        WidthMm: 254.0,
-        HeightMm: 253.0,
-        AreaPixels: 4510000.0,
-        MatchScore: 0.99);
-
-    var swapped = PlcInspectionOutputCalculator.CalculateFinalCorrection(
-        measurement,
-        PlcOutputTransform.Identity with { Xx = 0.0, Xy = 1.0, Yx = 1.0, Yy = 0.0 });
-    AssertEqual(-56.78, swapped.XDeviation, "swapped.XDeviation");
-    AssertEqual(12.34, swapped.YDeviation, "swapped.YDeviation");
-    AssertEqual(9.87, swapped.RDeviation, "swapped.RDeviation");
-
-    var swappedAndXInverted = PlcInspectionOutputCalculator.CalculateFinalCorrection(
-        measurement,
-        PlcOutputTransform.Identity with { Xx = 0.0, Xy = 1.0, Yx = -1.0, Yy = 0.0 });
-    AssertEqual(-56.78, swappedAndXInverted.XDeviation, "swappedAndXInverted.XDeviation");
-    AssertEqual(-12.34, swappedAndXInverted.YDeviation, "swappedAndXInverted.YDeviation");
-    AssertEqual(9.87, swappedAndXInverted.RDeviation, "swappedAndXInverted.RDeviation");
 }
 
 static void AssertEqual(double expected, double actual, string name)
