@@ -5,6 +5,7 @@ using JuliMvs.Plc;
 VerifyPlcFinalCorrectionUsesRDirectionFromCalibration();
 VerifyRCommandDirectionIsCoupledIntoXyCompensation();
 VerifyLegacyRAxisCalibrationDirectionIsInferred();
+VerifyFullRotationKeepsLargePcaAngleOffset();
 VerifyPlcOutputUsesFinalCorrectionMeasurement();
 VerifyXyOutputSignsDoNotChangeR();
 
@@ -94,6 +95,28 @@ static void VerifyLegacyRAxisCalibrationDirectionIsInferred()
     };
 
     AssertEqual(-1, calibration.GetMachineAngleDirection(), nameof(calibration.GetMachineAngleDirection));
+}
+
+static void VerifyFullRotationKeepsLargePcaAngleOffset()
+{
+    var currentPose = new PartPose2D(0, 0, 48.39430211500476);
+    var templatePose = new PartPose2D(0, 0, -87.60569788499524);
+
+    var fullRotation = XyrAlignmentSolver.Solve(
+        currentPose,
+        templatePose,
+        RAxisCenterCalibration.Disabled,
+        allowFullRotation: true);
+    var axisRotation = XyrAlignmentSolver.Solve(
+        currentPose,
+        templatePose,
+        RAxisCenterCalibration.Disabled,
+        allowFullRotation: false);
+
+    AssertEqual(136.0, fullRotation.AngleOffsetDegrees, nameof(fullRotation.AngleOffsetDegrees));
+    AssertEqual(-136.0, fullRotation.HomeRActionDegrees, nameof(fullRotation.HomeRActionDegrees));
+    AssertEqual(-44.0, axisRotation.AngleOffsetDegrees, nameof(axisRotation.AngleOffsetDegrees));
+    AssertEqual(44.0, axisRotation.HomeRActionDegrees, nameof(axisRotation.HomeRActionDegrees));
 }
 
 static void VerifyPlcOutputUsesFinalCorrectionMeasurement()
