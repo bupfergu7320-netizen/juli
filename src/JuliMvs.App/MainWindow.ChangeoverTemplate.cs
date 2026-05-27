@@ -4,6 +4,7 @@ using JuliMvs.App.Services;
 using JuliMvs.Core.Batch;
 using JuliMvs.Core.Inspection;
 using JuliMvs.Core.Vision;
+using OpenCvSharp;
 
 namespace JuliMvs.App;
 
@@ -313,6 +314,7 @@ public partial class MainWindow
         await _repository.SaveTemplateAsync(_template);
         await SaveRecipeAsync(_batchSession.ProductName);
         await RefreshChangeoverTemplateSelectorAsync();
+        RefreshProductionContourReferenceTemplate(_lastCameraImage!, _template, parameters);
 
         if (_batchSession.CanBuildTemplate)
         {
@@ -377,6 +379,21 @@ public partial class MainWindow
             templateImagePath,
             selfCheckEvidence.DiagnosticImagePath);
         _lastInspectionResult = templateResult;
+    }
+
+    private void RefreshProductionContourReferenceTemplate(
+        Mat templateImage,
+        PartTemplate template,
+        VisionParameters parameters)
+    {
+        _bypassLogTemplateFeature = _contourFeatureExtractor.Extract(templateImage, parameters);
+        _bypassLogTemplateImagePath = template.ImagePath;
+        _bypassLogTemplateProductName = template.ProductName.Trim();
+        Log(
+            $"生产正反/XYR参考模板已更新: 型号 {_bypassLogTemplateProductName}, " +
+            $"图片 {template.ImagePath}, " +
+            $"模板形态 {FormatAutoPartShapeClass(_bypassLogTemplateFeature.Strategy.ShapeClass)}, " +
+            $"半径特征 {_bypassLogTemplateFeature.RadiusSignalPixels:F2}px。");
     }
 
     private static string FormatProductBackSideNgSummary(bool enabled)
