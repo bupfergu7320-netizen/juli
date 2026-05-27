@@ -23,6 +23,7 @@ VerifyManualInspectionKeepsExistingImageBehavior();
 VerifyClearCalibrationDisablesAllCalibrationButKeepsProductionSettings();
 VerifyProductRecipeKeepsBackSideNgPerProduct();
 VerifyProductRecipeDefaultsAngleDetectionToAuto();
+VerifyAutoAngleStrategyClassifiesMixedRoundParts();
 VerifyProductRecipeClearsLegacyFrontBump();
 VerifyBackSideNgDoesNotRequireSelectedFrontBump();
 VerifyPlcOutputDirectionSettingsApplySimpleXySigns();
@@ -356,6 +357,71 @@ static void VerifyProductRecipeDefaultsAngleDetectionToAuto()
         (int)AngleDetectionMode.AutoPcaOrPolarRing,
         (int)applied.AngleDetectionMode,
         "runtime recipe angle detection defaults to auto");
+}
+
+static void VerifyAutoAngleStrategyClassifiesMixedRoundParts()
+{
+    var strongEllipse = AutoAngleStrategy.Select(
+        widthPixels: 240,
+        heightPixels: 180,
+        pcaRatio: 1.45,
+        circularity: 0.82,
+        templateRadiusSignalPixels: 8.0);
+    AssertIntEqual(
+        (int)AutoPartShapeClass.StrongEllipse,
+        (int)strongEllipse.ShapeClass,
+        "strong ellipse class");
+    AssertIntEqual(
+        (int)AutoAngleMethod.PcaAxis,
+        (int)strongEllipse.Method,
+        "strong ellipse method");
+    AssertBoolEqual(true, strongEllipse.AllowsRCorrection, "strong ellipse R enabled");
+
+    var irregularRound = AutoAngleStrategy.Select(
+        widthPixels: 200,
+        heightPixels: 198,
+        pcaRatio: 1.02,
+        circularity: 0.88,
+        templateRadiusSignalPixels: 5.0);
+    AssertIntEqual(
+        (int)AutoPartShapeClass.IrregularRound,
+        (int)irregularRound.ShapeClass,
+        "irregular round class");
+    AssertIntEqual(
+        (int)AutoAngleMethod.ContourPolar,
+        (int)irregularRound.Method,
+        "irregular round method");
+
+    var weakEllipse = AutoAngleStrategy.Select(
+        widthPixels: 215,
+        heightPixels: 200,
+        pcaRatio: 1.08,
+        circularity: 0.92,
+        templateRadiusSignalPixels: 3.0);
+    AssertIntEqual(
+        (int)AutoPartShapeClass.WeakEllipse,
+        (int)weakEllipse.ShapeClass,
+        "weak ellipse class");
+    AssertIntEqual(
+        (int)AutoAngleMethod.ContourPolar,
+        (int)weakEllipse.Method,
+        "weak ellipse method");
+
+    var nearCircle = AutoAngleStrategy.Select(
+        widthPixels: 201,
+        heightPixels: 200,
+        pcaRatio: 1.01,
+        circularity: 0.98,
+        templateRadiusSignalPixels: 0.1);
+    AssertIntEqual(
+        (int)AutoPartShapeClass.NearCircle,
+        (int)nearCircle.ShapeClass,
+        "near circle class");
+    AssertIntEqual(
+        (int)AutoAngleMethod.Disabled,
+        (int)nearCircle.Method,
+        "near circle method");
+    AssertBoolEqual(false, nearCircle.AllowsRCorrection, "near circle R disabled");
 }
 
 static void VerifyPlcOutputDirectionSettingsApplySimpleXySigns()

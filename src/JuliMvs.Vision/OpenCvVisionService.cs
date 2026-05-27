@@ -172,6 +172,8 @@ public sealed class OpenCvVisionService
 
 	private const double AutoPcaConfidenceScale = 0.35;
 
+	private const double AutoAngleDisabledScore = 1.0;
+
 	private const double ContourPolarMinimumRadiusSignal = 0.002;
 
 	private const double ContourRadiusMirrorMaximumAllowedErrorPixels = 15.0;
@@ -457,6 +459,12 @@ public sealed class OpenCvVisionService
 			reason = NgReason.ShapeOutOfTolerance;
 			message = (((object)similarity == null) ? $"轮廓NG: 分数={matchScore:F3}，低于阈值{shapeScoreThreshold:F3}。" : ("轮廓NG: " + similarity.Message + "。"));
 			return InspectionDecision.Ng;
+		}
+		if (angleDiagnostic.Source == "auto-angle-disabled")
+		{
+			reason = NgReason.None;
+			message = "OK，自动判断不需要R角度，X/Y输出有效，R=0";
+			return InspectionDecision.Ok;
 		}
 		if (!AngleMath.IsAngleWithinTolerance(angleOffset, angleToleranceDegrees))
 		{
@@ -834,23 +842,28 @@ public sealed class OpenCvVisionService
 	{
 		ContourAngleProfile profile = CalculateContourAngleProfile(detection);
 		string profileDetail = FormatContourAngleProfile(profile);
-		if (profile.IsPcaReliable)
-		{
-			ContourPolarAngleModel templateContourModel = TryGetContourPolarAngleModel(template, parameters);
-			if ((object)templateContourModel != null)
-			{
-				ContourAngleProfile profile2 = templateContourModel.Profile;
-				if ((object)profile2 != null && !profile2.IsPcaReliable)
-				{
-					return MatchContourPolarRotation(detection, templateContourModel, template.ReferenceAngleDegrees, parameters, profileDetail, buildDiagnostics);
-				}
-			}
-			return new ResolvedAngle(profile.PcaAngleDegrees, AllowsFullRotation: false, "auto-pca-contour", CalculatePcaAngleScore(profile.PcaRatio), 0.0, 180.0, null, profileDetail);
-		}
 		ContourPolarAngleModel contourModel = TryGetContourPolarAngleModel(template, parameters);
+		ContourAngleProfile strategyProfile = contourModel?.Profile ?? profile;
+		AutoAngleStrategyDecision strategy = AutoAngleStrategy.Select(
+			template.ReferenceWidthPixels > 0.0001 ? template.ReferenceWidthPixels : detection.WidthPixels,
+			template.ReferenceHeightPixels > 0.0001 ? template.ReferenceHeightPixels : detection.HeightPixels,
+			strategyProfile.PcaRatio,
+			strategyProfile.Circularity,
+			contourModel?.RadiusSignal ?? 0.0);
+		string strategyDetail = FormatAutoAngleStrategyDetail(strategy, profileDetail);
+		if (strategy.Method == AutoAngleMethod.Disabled)
+		{
+			return new ResolvedAngle(template.ReferenceAngleDegrees, AllowsFullRotation: false, "auto-angle-disabled", AutoAngleDisabledScore, 0.0, 0.0, null, strategyDetail);
+		}
+
+		if (strategy.Method == AutoAngleMethod.PcaAxis)
+		{
+			return new ResolvedAngle(profile.PcaAngleDegrees, AllowsFullRotation: false, "auto-pca-contour", CalculatePcaAngleScore(profile.PcaRatio), 0.0, 180.0, null, strategyDetail);
+		}
+
 		if ((object)contourModel != null)
 		{
-			return MatchContourPolarRotation(detection, contourModel, template.ReferenceAngleDegrees, parameters, profileDetail, buildDiagnostics);
+			return MatchContourPolarRotation(detection, contourModel, template.ReferenceAngleDegrees, parameters, strategyDetail, buildDiagnostics);
 		}
 		PolarRingAngleModel polarModel = TryGetPolarRingAngleModel(template, parameters);
 		if ((object)polarModel != null)
@@ -859,10 +872,15 @@ public sealed class OpenCvVisionService
 			return polarResult with
 			{
 				Source = ((polarResult.Source == "polar-ring-rotation") ? "auto-pca-polar-ring" : polarResult.Source),
-				Detail = profileDetail
+				Detail = strategyDetail
 			};
 		}
-		return new ResolvedAngle(detection.AngleDegrees, AllowsFullRotation: true, string.IsNullOrWhiteSpace(template.ImagePath) ? "auto-pca-polar-ring-no-template-image" : "auto-pca-polar-ring-no-signal", 0.0, 0.0, Math.Clamp(parameters.TemplateAngleSearchRangeDegrees, 1.0, 360.0), Array.Empty<AngleCandidateDiagnostic>(), profileDetail);
+		return new ResolvedAngle(template.ReferenceAngleDegrees, AllowsFullRotation: false, "auto-angle-disabled", AutoAngleDisabledScore, 0.0, 0.0, null, strategyDetail + " 未找到可用轮廓方向模型，R锁定为0。");
+	}
+
+	private static string FormatAutoAngleStrategyDetail(AutoAngleStrategyDecision strategy, string profileDetail)
+	{
+		return $"{strategy.Message} {profileDetail}; shape={strategy.ShapeClass}; method={strategy.Method}; axisRatio={strategy.AxisRatio:F3}; contourRadiusSignal={strategy.TemplateRadiusSignalPixels:F3}px";
 	}
 
 	private ContourMirrorFaceDebugComputation? AnalyzeContourMirrorFaceDebug(PartDetection detection, PartTemplate template, VisionParameters parameters)
@@ -902,6 +920,7 @@ public sealed class OpenCvVisionService
 			"outer-contour-no-template-image" => "模板图片不可用，使用外轮廓角度。", 
 			"outer-contour-no-auto-feature" => "未找到可靠的自动角度特征，使用外轮廓角度。", 
 			"auto-pca-contour" => "使用PCA轮廓角度: " + resolvedAngle.Detail + "。", 
+			"auto-angle-disabled" => "自动判断不输出R角度: " + resolvedAngle.Detail + "。", 
 			"auto-pca-polar-ring-no-template-image" => "模板图片不可用，自动PCA不可靠: " + resolvedAngle.Detail + "。", 
 			"auto-pca-polar-ring-no-signal" => "自动PCA检查后未找到可靠的轮廓/极坐标角度信号: " + resolvedAngle.Detail + "。", 
 			"auto-feature-rotation-no-feature" => "模板图片中未找到可靠的自动角度特征。", 
