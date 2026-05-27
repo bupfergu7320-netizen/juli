@@ -88,7 +88,7 @@ public partial class MainWindow
 
             _productionEnabled = true;
             UpdateRunStopUi();
-            Log("上位机当前为运行中，视觉判断已禁用，PLC触发将只执行拍照、显示和OK零补偿写入。");
+            Log("上位机当前为运行中，PLC触发将执行拍照、显示、正反面检测和PLC结果写入；XYR为零补偿输出。");
             return;
         }
 

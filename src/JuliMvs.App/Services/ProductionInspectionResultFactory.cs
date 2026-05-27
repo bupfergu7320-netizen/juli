@@ -2,9 +2,9 @@ using JuliMvs.Core.Inspection;
 
 namespace JuliMvs.App.Services;
 
-internal static class VisionJudgmentBypassResultFactory
+internal static class ProductionInspectionResultFactory
 {
-    public const string Message = "OK，视觉判断已禁用，仅验证PLC通信和拍照流程。";
+    public const string OkMessage = "OK，正反面检测通过，XYR零补偿输出。";
 
     public static InspectionResult CreateOk(
         string? batchNo,
@@ -18,7 +18,7 @@ internal static class VisionJudgmentBypassResultFactory
                 : partNo.Trim(),
             InspectionDecision.Ok,
             NgReason.None,
-            Message,
+            OkMessage,
             CreateZeroMeasurement(),
             rawImagePath);
     }

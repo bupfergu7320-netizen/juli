@@ -451,8 +451,8 @@ public partial class MainWindow
         Log($"{logPrefix}: {result.Decision}: {result.Message}");
         Log(
             result.Decision == InspectionDecision.Ng
-                ? "视觉判断旁路试运行: 本次只启用外轮廓镜像正反面NG，XYR仍为零补偿，PLC通信流程不变。"
-                : "视觉判断已禁用: 本次未执行模板、角度、尺寸等判断算法，PLC输出为OK零补偿。");
+                ? "生产正反面检测: 已判定反面NG，XYR仍为零补偿，PLC通信流程不变。"
+                : "生产正反面检测: 未发现反面NG，PLC输出OK零补偿。");
         Log(contourJudgmentText);
 
         var plcStopwatch = Stopwatch.StartNew();
@@ -492,13 +492,13 @@ public partial class MainWindow
     {
         if (ShouldApplyBypassBackSideNg(contourJudgment, out var ngMessage))
         {
-            return VisionJudgmentBypassResultFactory.CreateBackSideNg(
+            return ProductionInspectionResultFactory.CreateBackSideNg(
                 _batchSession.BatchNo,
                 ngMessage,
                 rawImagePath);
         }
 
-        return VisionJudgmentBypassResultFactory.CreateOk(
+        return ProductionInspectionResultFactory.CreateOk(
             _batchSession.BatchNo,
             rawImagePath);
     }
@@ -559,19 +559,19 @@ public partial class MainWindow
     {
         if (_bypassLogTemplateFeature is null)
         {
-            return new ContourFrontBackAnalysis("，正反=无参考模板(仅记录)", null);
+            return new ContourFrontBackAnalysis("，正反=无参考模板", null);
         }
 
         if (!string.IsNullOrWhiteSpace(_bypassLogTemplateProductName) &&
             !string.Equals(_bypassLogTemplateProductName, _currentProductName.Trim(), StringComparison.OrdinalIgnoreCase))
         {
-            return new ContourFrontBackAnalysis($"，正反=参考模板型号不一致(仅记录)，参考={_bypassLogTemplateProductName}", null);
+            return new ContourFrontBackAnalysis($"，正反=参考模板型号不一致，参考={_bypassLogTemplateProductName}", null);
         }
 
         var match = _contourFrontBackMatcher.Match(currentFeature, _bypassLogTemplateFeature);
         if (match.Decision == ContourFrontBackDecision.Unavailable)
         {
-            return new ContourFrontBackAnalysis($"，正反=不可用(仅记录)，原因={SimplifyFrontBackMessage(match.Message)}", match);
+            return new ContourFrontBackAnalysis($"，正反=不可用，原因={SimplifyFrontBackMessage(match.Message)}", match);
         }
 
         return new ContourFrontBackAnalysis(

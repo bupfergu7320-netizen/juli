@@ -83,7 +83,7 @@ public partial class MainWindow
         ResetProductionCounters();
         ClearCurrentInspection();
         _changeoverTemplateRequested = false;
-        MessageText.Text = "视觉判断已禁用：生产模式只执行拍照、显示、PLC通信和OK零补偿输出。";
+        MessageText.Text = "生产模式已就绪：执行拍照、显示、PLC通信；勾选反面NG时启用正反面检测，XYR零补偿输出。";
     }
 
     private async Task TryLoadBypassLogReferenceTemplateAsync(string productName)
@@ -147,7 +147,7 @@ public partial class MainWindow
         }
         catch (Exception ex)
         {
-            Log($"日志正反面参考模板加载失败: {ex.Message}。生产旁路不受影响，只记录当前轮廓形态。");
+            Log($"正反面参考模板加载失败: {ex.Message}。生产流程不受影响，本次无法执行正反面对比。");
         }
     }
 

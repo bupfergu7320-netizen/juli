@@ -21,8 +21,8 @@ VerifyProductionOkDoesNotSaveImages();
 VerifyProductionNgSavesOnlyDiagnosticImage();
 VerifyManualInspectionKeepsExistingImageBehavior();
 VerifyPlcValidationSkipsTemplateWhenVisionJudgmentDisabled();
-VerifyVisionJudgmentBypassCreatesOkZeroCorrection();
-VerifyVisionJudgmentBypassCreatesBackSideNgZeroCorrection();
+VerifyProductionInspectionCreatesOkZeroCorrection();
+VerifyProductionInspectionCreatesBackSideNgZeroCorrection();
 VerifyClearCalibrationDisablesAllCalibrationButKeepsProductionSettings();
 VerifyProductRecipeKeepsBackSideNgPerProduct();
 VerifyProductRecipeSaveFromTemplateKeepsTemplateBackSideNg();
@@ -256,9 +256,9 @@ static void VerifyPlcValidationSkipsTemplateWhenVisionJudgmentDisabled()
     AssertEqual(PlcCaptureRequestAction.Proceed.ToString(), decision.Action.ToString(), "PLC validation bypass action");
 }
 
-static void VerifyVisionJudgmentBypassCreatesOkZeroCorrection()
+static void VerifyProductionInspectionCreatesOkZeroCorrection()
 {
-    var result = VisionJudgmentBypassResultFactory.CreateOk("BATCH-1", @"D:\image.bmp", "PART-1");
+    var result = ProductionInspectionResultFactory.CreateOk("BATCH-1", @"D:\image.bmp", "PART-1");
     var measurement = result.Measurement ?? throw new InvalidOperationException("bypass result should have measurement");
 
     AssertEqual(InspectionDecision.Ok.ToString(), result.Decision.ToString(), "bypass decision");
@@ -274,9 +274,9 @@ static void VerifyVisionJudgmentBypassCreatesOkZeroCorrection()
     AssertDoubleEqual(0, measurement.RotationCompensationDegrees, "bypass R compensation");
 }
 
-static void VerifyVisionJudgmentBypassCreatesBackSideNgZeroCorrection()
+static void VerifyProductionInspectionCreatesBackSideNgZeroCorrection()
 {
-    var result = VisionJudgmentBypassResultFactory.CreateBackSideNg(
+    var result = ProductionInspectionResultFactory.CreateBackSideNg(
         "BATCH-1",
         "反面NG: test",
         @"D:\image.bmp",
