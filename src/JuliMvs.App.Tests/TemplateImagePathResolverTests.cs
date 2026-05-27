@@ -22,6 +22,7 @@ VerifyProductionNgSavesOnlyDiagnosticImage();
 VerifyManualInspectionKeepsExistingImageBehavior();
 VerifyPlcValidationSkipsTemplateWhenVisionJudgmentDisabled();
 VerifyProductionInspectionCreatesOkZeroCorrection();
+VerifyProductionInspectionCreatesOkXyrCorrection();
 VerifyProductionInspectionCreatesBackSideNgZeroCorrection();
 VerifyClearCalibrationDisablesAllCalibrationButKeepsProductionSettings();
 VerifyProductRecipeKeepsBackSideNgPerProduct();
@@ -272,6 +273,40 @@ static void VerifyProductionInspectionCreatesOkZeroCorrection()
     AssertDoubleEqual(0, measurement.XCompensationMm, "bypass X compensation");
     AssertDoubleEqual(0, measurement.YCompensationMm, "bypass Y compensation");
     AssertDoubleEqual(0, measurement.RotationCompensationDegrees, "bypass R compensation");
+}
+
+static void VerifyProductionInspectionCreatesOkXyrCorrection()
+{
+    var sourceMeasurement = new InspectionMeasurement(
+        CenterXPixel: 120,
+        CenterYPixel: 240,
+        XOffsetMm: 1.25,
+        YOffsetMm: -0.75,
+        XCompensationMm: -1.40,
+        YCompensationMm: 0.60,
+        AngleDegrees: 15.0,
+        AngleOffsetDegrees: 5.0,
+        RotationCompensationDegrees: -5.0,
+        WidthMm: 20.0,
+        HeightMm: 18.0,
+        AreaPixels: 30000,
+        MatchScore: 0.8);
+
+    var result = ProductionInspectionResultFactory.CreateOk(
+        "BATCH-1",
+        sourceMeasurement,
+        rawImagePath: @"D:\image.bmp",
+        partNo: "PART-1");
+    var measurement = result.Measurement ?? throw new InvalidOperationException("production result should have measurement");
+
+    AssertEqual(InspectionDecision.Ok.ToString(), result.Decision.ToString(), "production XYR decision");
+    AssertEqual(NgReason.None.ToString(), result.NgReason.ToString(), "production XYR NG reason");
+    AssertDoubleEqual(1.25, measurement.XOffsetMm, "production XYR X offset");
+    AssertDoubleEqual(-0.75, measurement.YOffsetMm, "production XYR Y offset");
+    AssertDoubleEqual(5.0, measurement.AngleOffsetDegrees, "production XYR R offset");
+    AssertDoubleEqual(-1.40, measurement.XCompensationMm, "production XYR X compensation");
+    AssertDoubleEqual(0.60, measurement.YCompensationMm, "production XYR Y compensation");
+    AssertDoubleEqual(-5.0, measurement.RotationCompensationDegrees, "production XYR R compensation");
 }
 
 static void VerifyProductionInspectionCreatesBackSideNgZeroCorrection()

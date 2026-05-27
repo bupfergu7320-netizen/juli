@@ -4,10 +4,13 @@ namespace JuliMvs.App.Services;
 
 internal static class ProductionInspectionResultFactory
 {
-    public const string OkMessage = "OK，正反面检测通过，XYR零补偿输出。";
+    public const string OkMessage = "OK，正反面检测通过，输出XYR纠偏。";
+    public const string ZeroCorrectionOkMessage = "OK，正反面检测通过，XYR不可用，零补偿输出。";
 
     public static InspectionResult CreateOk(
         string? batchNo,
+        InspectionMeasurement measurement,
+        string? message = null,
         string? rawImagePath = null,
         string? partNo = null)
     {
@@ -18,9 +21,22 @@ internal static class ProductionInspectionResultFactory
                 : partNo.Trim(),
             InspectionDecision.Ok,
             NgReason.None,
-            OkMessage,
-            CreateZeroMeasurement(),
+            string.IsNullOrWhiteSpace(message) ? OkMessage : message.Trim(),
+            measurement,
             rawImagePath);
+    }
+
+    public static InspectionResult CreateOk(
+        string? batchNo,
+        string? rawImagePath = null,
+        string? partNo = null)
+    {
+        return CreateOk(
+            batchNo,
+            CreateZeroMeasurement(),
+            ZeroCorrectionOkMessage,
+            rawImagePath,
+            partNo);
     }
 
     public static InspectionResult CreateBackSideNg(

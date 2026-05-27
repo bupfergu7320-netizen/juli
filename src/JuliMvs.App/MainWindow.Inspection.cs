@@ -11,6 +11,7 @@ using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using System.Windows.Threading;
 using JuliMvs.Camera.Hik;
+using JuliMvs.Core;
 using JuliMvs.Core.Batch;
 using JuliMvs.Core.Camera;
 using JuliMvs.Core.Inspection;
@@ -436,7 +437,7 @@ public partial class MainWindow
         var inspectionStopwatch = Stopwatch.StartNew();
         var contourJudgment = BuildContourJudgment(image);
         var contourJudgmentText = contourJudgment.LogLine;
-        var result = CreateBypassInspectionResult(rawImagePath, contourJudgment);
+        var result = CreateBypassInspectionResult(rawImagePath, contourJudgment, out var productionOutputLog);
         await _repository.SaveResultAsync(result);
         inspectionStopwatch.Stop();
 
@@ -449,10 +450,7 @@ public partial class MainWindow
         renderStopwatch.Stop();
 
         Log($"{logPrefix}: {result.Decision}: {result.Message}");
-        Log(
-            result.Decision == InspectionDecision.Ng
-                ? "生产正反面检测: 已判定反面NG，XYR仍为零补偿，PLC通信流程不变。"
-                : "生产正反面检测: 未发现反面NG，PLC输出OK零补偿。");
+        Log(productionOutputLog);
         Log(contourJudgmentText);
 
         var plcStopwatch = Stopwatch.StartNew();
@@ -488,19 +486,167 @@ public partial class MainWindow
 
     private InspectionResult CreateBypassInspectionResult(
         string? rawImagePath,
-        ContourJudgmentAnalysis contourJudgment)
+        ContourJudgmentAnalysis contourJudgment,
+        out string productionOutputLog)
     {
         if (ShouldApplyBypassBackSideNg(contourJudgment, out var ngMessage))
         {
+            productionOutputLog = "生产正反面检测: 已判定反面NG，XYR仍为零补偿，PLC通信流程不变。";
             return ProductionInspectionResultFactory.CreateBackSideNg(
                 _batchSession.BatchNo,
                 ngMessage,
                 rawImagePath);
         }
 
+        var measurement = BuildProductionMeasurementOrZero(contourJudgment, out var measurementLog, out var okMessage);
+        productionOutputLog = measurementLog;
         return ProductionInspectionResultFactory.CreateOk(
             _batchSession.BatchNo,
+            measurement,
+            okMessage,
             rawImagePath);
+    }
+
+    private InspectionMeasurement BuildProductionMeasurementOrZero(
+        ContourJudgmentAnalysis contourJudgment,
+        out string productionOutputLog,
+        out string resultMessage)
+    {
+        if (TryBuildProductionMeasurement(contourJudgment, out var measurement, out var reason))
+        {
+            productionOutputLog = "生产正反面检测: 未发现反面NG，已输出XYR纠偏。";
+            resultMessage = ProductionInspectionResultFactory.OkMessage;
+            return measurement;
+        }
+
+        productionOutputLog = $"生产正反面检测: 未发现反面NG，但XYR不可用，PLC输出OK零补偿。原因={reason}";
+        resultMessage = $"{ProductionInspectionResultFactory.ZeroCorrectionOkMessage}原因: {reason}";
+        return CreateZeroProductionMeasurement();
+    }
+
+    private bool TryBuildProductionMeasurement(
+        ContourJudgmentAnalysis contourJudgment,
+        out InspectionMeasurement measurement,
+        out string reason)
+    {
+        measurement = CreateZeroProductionMeasurement();
+        reason = string.Empty;
+
+        var template = _template;
+        if (template is null)
+        {
+            reason = "未加载当前型号标准位/模板";
+            return false;
+        }
+
+        var currentFeature = contourJudgment.Feature;
+        if (currentFeature is null)
+        {
+            reason = "当前图片外轮廓提取失败";
+            return false;
+        }
+
+        var templateFeature = _bypassLogTemplateFeature;
+        if (templateFeature is null)
+        {
+            reason = "未加载模板外轮廓特征";
+            return false;
+        }
+
+        var activeParameters = ReadVisionParameters();
+        var setup = OpenCvVisionService.ValidateProductionSetup(template, activeParameters);
+        if (!setup.IsReady)
+        {
+            reason = ProductionSetupMessageFormatter.FormatBlockMessage(setup.Reason);
+            return false;
+        }
+
+        var resolvedAngleDegrees = template.ReferenceAngleDegrees;
+        var matchScore = 0.0;
+        var allowFullRotation = false;
+        if (currentFeature.Strategy.AllowsRCorrection && templateFeature.Strategy.AllowsRCorrection)
+        {
+            var radiusMatch = contourJudgment.FrontBackMatch is { } match &&
+                match.Decision != ContourFrontBackDecision.Unavailable
+                    ? new ContourRadiusMatchWithAlternative(
+                        Shift: 0,
+                        AngleDegrees: match.FrontAngleDegrees,
+                        ErrorPixels: match.FrontErrorPixels,
+                        ErrorNormalized: 0,
+                        AlternativeShift: 0,
+                        AlternativeAngleDegrees: 0,
+                        AlternativeErrorPixels: match.FrontAlternativeErrorPixels,
+                        AlternativeErrorNormalized: 0)
+                    : ContourFeatureExtractor.MatchRadiusSignatureWithAlternatives(
+                        currentFeature.RadiusSignature,
+                        templateFeature.RadiusSignature);
+
+            resolvedAngleDegrees = AngleMath.NormalizeDegrees360(template.ReferenceAngleDegrees + radiusMatch.AngleDegrees);
+            matchScore = BuildContourMatchScore(radiusMatch.ErrorPixels);
+            allowFullRotation = true;
+        }
+        else
+        {
+            matchScore = currentFeature.Strategy.AllowsRCorrection || templateFeature.Strategy.AllowsRCorrection
+                ? 0.0
+                : 1.0;
+        }
+
+        var currentCenter = activeParameters.CameraCalibration.PixelToMachine(
+            currentFeature.CenterXPixel,
+            currentFeature.CenterYPixel);
+        var referenceCenter = new MachinePoint(
+            template.ReferenceCenterXMm,
+            template.ReferenceCenterYMm);
+        var alignmentSnapshot = XyrAlignmentSolver.Solve(
+            new PartPose2D(currentCenter.XMm, currentCenter.YMm, resolvedAngleDegrees, matchScore),
+            new PartPose2D(referenceCenter.XMm, referenceCenter.YMm, template.ReferenceAngleDegrees, template.MatchScoreBaseline),
+            activeParameters.RAxisCenterCalibration,
+            activeParameters.InvertRotationCompensation ? -1 : 1,
+            allowFullRotation);
+        measurement = new InspectionMeasurement(
+            currentFeature.CenterXPixel,
+            currentFeature.CenterYPixel,
+            alignmentSnapshot.XOffsetMm,
+            alignmentSnapshot.YOffsetMm,
+            alignmentSnapshot.HomeXActionMm,
+            alignmentSnapshot.HomeYActionMm,
+            resolvedAngleDegrees,
+            alignmentSnapshot.AngleOffsetDegrees,
+            alignmentSnapshot.HomeRActionDegrees,
+            template.WidthMm,
+            template.HeightMm,
+            currentFeature.AreaPixels,
+            matchScore);
+        return true;
+    }
+
+    private static InspectionMeasurement CreateZeroProductionMeasurement()
+    {
+        return new InspectionMeasurement(
+            CenterXPixel: 0,
+            CenterYPixel: 0,
+            XOffsetMm: 0,
+            YOffsetMm: 0,
+            XCompensationMm: 0,
+            YCompensationMm: 0,
+            AngleDegrees: 0,
+            AngleOffsetDegrees: 0,
+            RotationCompensationDegrees: 0,
+            WidthMm: 0,
+            HeightMm: 0,
+            AreaPixels: 0,
+            MatchScore: 0);
+    }
+
+    private static double BuildContourMatchScore(double errorPixels)
+    {
+        if (double.IsNaN(errorPixels) || double.IsInfinity(errorPixels))
+        {
+            return 0.0;
+        }
+
+        return Math.Clamp(1.0 - errorPixels / 30.0, 0.0, 1.0);
     }
 
     private bool ShouldApplyBypassBackSideNg(

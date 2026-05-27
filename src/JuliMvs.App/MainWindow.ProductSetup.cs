@@ -83,7 +83,7 @@ public partial class MainWindow
         ResetProductionCounters();
         ClearCurrentInspection();
         _changeoverTemplateRequested = false;
-        MessageText.Text = "生产模式已就绪：执行拍照、显示、PLC通信；勾选反面NG时启用正反面检测，XYR零补偿输出。";
+        MessageText.Text = "生产模式已就绪：执行拍照、显示、PLC通信；勾选反面NG时启用正反面检测，OK时输出XYR纠偏。";
     }
 
     private async Task TryLoadBypassLogReferenceTemplateAsync(string productName)
