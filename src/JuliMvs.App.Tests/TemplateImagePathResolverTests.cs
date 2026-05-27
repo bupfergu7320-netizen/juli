@@ -20,6 +20,9 @@ VerifyLegacyLocalSettingsDefaultsCurrentProductName();
 VerifyProductionOkDoesNotSaveImages();
 VerifyProductionNgSavesOnlyDiagnosticImage();
 VerifyManualInspectionKeepsExistingImageBehavior();
+VerifyPlcValidationSkipsTemplateWhenVisionJudgmentDisabled();
+VerifyVisionJudgmentBypassCreatesOkZeroCorrection();
+VerifyVisionJudgmentBypassCreatesBackSideNgZeroCorrection();
 VerifyClearCalibrationDisablesAllCalibrationButKeepsProductionSettings();
 VerifyProductRecipeKeepsBackSideNgPerProduct();
 VerifyProductRecipeSaveFromTemplateKeepsTemplateBackSideNg();
@@ -27,6 +30,12 @@ VerifyProductRecipeDefaultsAngleDetectionToAuto();
 VerifyAutoAngleStrategyClassifiesMixedRoundParts();
 VerifyProductRecipeClearsLegacyFrontBump();
 VerifyBackSideNgDoesNotRequireSelectedFrontBump();
+VerifyContourFeatureExtractorClassifiesStrongEllipse();
+VerifyContourFeatureExtractorLocksNearCircleR();
+VerifyContourRadiusSignatureMatchesRotation();
+VerifyContourFrontBackMatcherDetectsFront();
+VerifyContourFrontBackMatcherDetectsBack();
+VerifyContourFrontBackMatcherRejectsNearCircle();
 VerifyPlcOutputDirectionSettingsApplySimpleXySigns();
 VerifyDirectionFormatterShowsXySigns();
 VerifyProductTemplateNameIsUniqueAndRebuildOverwrites();
@@ -230,6 +239,61 @@ static void VerifyManualInspectionKeepsExistingImageBehavior()
     AssertBoolEqual(true, decision.KeepIncomingRawImagePath, "manual raw image path");
     AssertBoolEqual(true, decision.SaveDiagnosticImage, "manual diagnostic image");
     AssertEqual(null, decision.ProductionLogMessage, "manual log");
+}
+
+static void VerifyPlcValidationSkipsTemplateWhenVisionJudgmentDisabled()
+{
+    var validator = new PlcCaptureRequestValidator();
+
+    var decision = validator.Validate(new PlcCaptureRequestState(
+        ProductionEnabled: true,
+        ChangeoverTemplateRequested: false,
+        CameraConnected: true,
+        TemplateLoaded: false,
+        BatchCanInspect: false,
+        VisionJudgmentDisabled: true));
+
+    AssertEqual(PlcCaptureRequestAction.Proceed.ToString(), decision.Action.ToString(), "PLC validation bypass action");
+}
+
+static void VerifyVisionJudgmentBypassCreatesOkZeroCorrection()
+{
+    var result = VisionJudgmentBypassResultFactory.CreateOk("BATCH-1", @"D:\image.bmp", "PART-1");
+    var measurement = result.Measurement ?? throw new InvalidOperationException("bypass result should have measurement");
+
+    AssertEqual(InspectionDecision.Ok.ToString(), result.Decision.ToString(), "bypass decision");
+    AssertEqual(NgReason.None.ToString(), result.NgReason.ToString(), "bypass NG reason");
+    AssertEqual("BATCH-1", result.BatchNo, "bypass batch");
+    AssertEqual("PART-1", result.PartNo, "bypass part");
+    AssertEqual(@"D:\image.bmp", result.RawImagePath, "bypass raw image");
+    AssertDoubleEqual(0, measurement.XOffsetMm, "bypass X offset");
+    AssertDoubleEqual(0, measurement.YOffsetMm, "bypass Y offset");
+    AssertDoubleEqual(0, measurement.AngleOffsetDegrees, "bypass R offset");
+    AssertDoubleEqual(0, measurement.XCompensationMm, "bypass X compensation");
+    AssertDoubleEqual(0, measurement.YCompensationMm, "bypass Y compensation");
+    AssertDoubleEqual(0, measurement.RotationCompensationDegrees, "bypass R compensation");
+}
+
+static void VerifyVisionJudgmentBypassCreatesBackSideNgZeroCorrection()
+{
+    var result = VisionJudgmentBypassResultFactory.CreateBackSideNg(
+        "BATCH-1",
+        "反面NG: test",
+        @"D:\image.bmp",
+        "PART-1");
+    var measurement = result.Measurement ?? throw new InvalidOperationException("bypass NG result should have measurement");
+
+    AssertEqual(InspectionDecision.Ng.ToString(), result.Decision.ToString(), "bypass back NG decision");
+    AssertEqual(NgReason.BackSideDetected.ToString(), result.NgReason.ToString(), "bypass back NG reason");
+    AssertEqual("BATCH-1", result.BatchNo, "bypass back NG batch");
+    AssertEqual("PART-1", result.PartNo, "bypass back NG part");
+    AssertEqual(@"D:\image.bmp", result.RawImagePath, "bypass back NG raw image");
+    AssertDoubleEqual(0, measurement.XOffsetMm, "bypass back NG X offset");
+    AssertDoubleEqual(0, measurement.YOffsetMm, "bypass back NG Y offset");
+    AssertDoubleEqual(0, measurement.AngleOffsetDegrees, "bypass back NG R offset");
+    AssertDoubleEqual(0, measurement.XCompensationMm, "bypass back NG X compensation");
+    AssertDoubleEqual(0, measurement.YCompensationMm, "bypass back NG Y compensation");
+    AssertDoubleEqual(0, measurement.RotationCompensationDegrees, "bypass back NG R compensation");
 }
 
 static void VerifyClearCalibrationDisablesAllCalibrationButKeepsProductionSettings()
@@ -606,6 +670,117 @@ static void VerifyBackSideNgDoesNotRequireSelectedFrontBump()
     AssertEqual(ProductionSetupBlockReason.None.ToString(), setup.Reason.ToString(), "backside NG setup reason");
 }
 
+static void VerifyContourFeatureExtractorClassifiesStrongEllipse()
+{
+    using var image = CreateSyntheticPartImage((mat, center) =>
+    {
+        Cv2.Ellipse(
+            mat,
+            center,
+            new Size(130, 70),
+            angle: 25,
+            startAngle: 0,
+            endAngle: 360,
+            Scalar.White,
+            thickness: -1);
+    });
+    var extractor = new ContourFeatureExtractor();
+
+    var feature = extractor.Extract(image);
+
+    AssertEqual(AutoPartShapeClass.StrongEllipse.ToString(), feature.Strategy.ShapeClass.ToString(), "strong ellipse shape");
+    AssertBoolEqual(true, feature.Strategy.AllowsRCorrection, "strong ellipse allows R");
+    AssertBoolEqual(feature.AxisRatio > 1.2, true, "strong ellipse axis ratio");
+    AssertIntEqual(ContourFeatureExtractor.DefaultRadiusSampleCount, feature.RadiusSignature.Count, "strong ellipse radius samples");
+}
+
+static void VerifyContourFeatureExtractorLocksNearCircleR()
+{
+    using var image = CreateSyntheticPartImage((mat, center) =>
+    {
+        Cv2.Circle(mat, center, 95, Scalar.White, thickness: -1);
+    });
+    var extractor = new ContourFeatureExtractor();
+
+    var feature = extractor.Extract(image);
+
+    AssertEqual(AutoPartShapeClass.NearCircle.ToString(), feature.Strategy.ShapeClass.ToString(), "near circle shape");
+    AssertEqual(AutoAngleMethod.Disabled.ToString(), feature.Strategy.Method.ToString(), "near circle method");
+    AssertBoolEqual(false, feature.Strategy.AllowsRCorrection, "near circle locks R");
+}
+
+static void VerifyContourRadiusSignatureMatchesRotation()
+{
+    using var template = CreateSyntheticPartImage((mat, center) =>
+    {
+        Cv2.Circle(mat, center, 95, Scalar.White, thickness: -1);
+        Cv2.Circle(mat, new Point(center.X + 38, center.Y - 72), 24, Scalar.White, thickness: -1);
+    });
+    using var current = CreateSyntheticPartImage((mat, center) =>
+    {
+        Cv2.Circle(mat, center, 95, Scalar.White, thickness: -1);
+        Cv2.Circle(mat, new Point(center.X + 72, center.Y + 38), 24, Scalar.White, thickness: -1);
+    });
+    var extractor = new ContourFeatureExtractor();
+    var templateFeature = extractor.Extract(template);
+    var currentFeature = extractor.Extract(current);
+
+    var match = ContourFeatureExtractor.MatchRadiusSignature(
+        currentFeature.RadiusSignature,
+        templateFeature.RadiusSignature);
+
+    AssertBoolEqual(true, match.ErrorPixels < 8.0, "rotated contour match error");
+    AssertBoolEqual(true, Math.Abs(match.AngleDegrees - 90.0) < 3.0, "rotated contour match angle");
+}
+
+static void VerifyContourFrontBackMatcherDetectsFront()
+{
+    var extractor = new ContourFeatureExtractor();
+    var matcher = new ContourFrontBackMatcher();
+    using var templateImage = CreateAsymmetricRoundPartImage(mirrored: false);
+    using var currentImage = CreateAsymmetricRoundPartImage(mirrored: false);
+    var template = extractor.Extract(templateImage);
+    var current = extractor.Extract(currentImage);
+
+    var match = matcher.Match(current, template);
+
+    AssertEqual(ContourFrontBackDecision.Front.ToString(), match.Decision.ToString(), "front/back front decision");
+    AssertBoolEqual(true, match.IsReliable, "front/back front reliable");
+    AssertBoolEqual(true, match.FrontErrorPixels < match.BackErrorPixels, "front/back front score order");
+}
+
+static void VerifyContourFrontBackMatcherDetectsBack()
+{
+    var extractor = new ContourFeatureExtractor();
+    var matcher = new ContourFrontBackMatcher();
+    using var templateImage = CreateAsymmetricRoundPartImage(mirrored: false);
+    using var currentImage = CreateAsymmetricRoundPartImage(mirrored: true);
+    var template = extractor.Extract(templateImage);
+    var current = extractor.Extract(currentImage);
+
+    var match = matcher.Match(current, template);
+
+    AssertEqual(ContourFrontBackDecision.Back.ToString(), match.Decision.ToString(), "front/back back decision");
+    AssertBoolEqual(true, match.IsReliable, "front/back back reliable");
+    AssertBoolEqual(true, match.BackErrorPixels < match.FrontErrorPixels, "front/back back score order");
+}
+
+static void VerifyContourFrontBackMatcherRejectsNearCircle()
+{
+    var extractor = new ContourFeatureExtractor();
+    var matcher = new ContourFrontBackMatcher();
+    using var image = CreateSyntheticPartImage((mat, center) =>
+    {
+        Cv2.Circle(mat, center, 95, Scalar.White, thickness: -1);
+    });
+    var feature = extractor.Extract(image);
+
+    var match = matcher.Match(feature, feature);
+
+    AssertEqual(ContourFrontBackDecision.Unavailable.ToString(), match.Decision.ToString(), "front/back near circle unavailable");
+    AssertBoolEqual(false, match.IsReliable, "front/back near circle reliable");
+}
+
 static void VerifyProductTemplateNameIsUniqueAndRebuildOverwrites()
 {
     var testRoot = CreateTempDirectory();
@@ -846,6 +1021,24 @@ static string CreateTempDirectory()
     var path = Path.Combine(Path.GetTempPath(), "JuliMvs.App.Tests", Guid.NewGuid().ToString("N"));
     Directory.CreateDirectory(path);
     return path;
+}
+
+static Mat CreateSyntheticPartImage(Action<Mat, Point> draw)
+{
+    var image = new Mat(new Size(420, 420), MatType.CV_8UC1, Scalar.Black);
+    draw(image, new Point(210, 210));
+    return image;
+}
+
+static Mat CreateAsymmetricRoundPartImage(bool mirrored)
+{
+    return CreateSyntheticPartImage((mat, center) =>
+    {
+        Cv2.Circle(mat, center, 95, Scalar.White, thickness: -1);
+        var direction = mirrored ? -1 : 1;
+        Cv2.Circle(mat, new Point(center.X + direction * 46, center.Y - 72), 28, Scalar.White, thickness: -1);
+        Cv2.Circle(mat, new Point(center.X - direction * 72, center.Y + 34), 16, Scalar.Black, thickness: -1);
+    });
 }
 
 static void AssertEqual(string? expected, string? actual, string name)

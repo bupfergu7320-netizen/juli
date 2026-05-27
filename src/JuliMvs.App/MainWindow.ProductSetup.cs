@@ -19,6 +19,7 @@ using JuliMvs.App.Services;
 using JuliMvs.Persistence;
 using JuliMvs.Plc;
 using JuliMvs.Vision;
+using OpenCvSharp;
 
 namespace JuliMvs.App;
 
@@ -36,6 +37,17 @@ public partial class MainWindow
         try
         {
             var batchNo = BatchNumberGenerator.GenerateDefaultBatchNo();
+            if (VisionJudgmentDisabled)
+            {
+                StartVisionJudgmentBypassBatch(batchNo, productName);
+                await TryLoadBypassLogReferenceTemplateAsync(productName);
+                _productionEnabled = true;
+                UpdateRunStopUi();
+                SaveLocalSettings();
+                Log($"无视觉判断生产模式已就绪: 型号 {productName}, 批次 {batchNo}, 等待PLC触发D1000=1。");
+                return;
+            }
+
             if (await StartBatchWithLatestTemplateAsync(batchNo, productName))
             {
                 _productionEnabled = true;
@@ -50,6 +62,92 @@ public partial class MainWindow
             UpdateRunStopUi();
             MessageText.Text = $"最简生产模式未就绪: {ex.Message}";
             Log(MessageText.Text);
+        }
+    }
+
+    private void StartVisionJudgmentBypassBatch(string batchNo, string productName)
+    {
+        if (_batchSession.CanEnd)
+        {
+            var endedBatch = _batchSession.BatchNo;
+            _batchSession.End();
+            Log($"进入无视觉判断模式前结束当前批次: {endedBatch}");
+        }
+
+        _currentBatchNo = batchNo;
+        _currentProductName = productName.Trim();
+        _batchSession = BatchSession.Empty();
+        _batchSession.Start(batchNo, _currentProductName);
+        _batchSession.MarkTemplateCreated();
+        _batchSession.ConfirmFirstArticle();
+        ResetProductionCounters();
+        ClearCurrentInspection();
+        _changeoverTemplateRequested = false;
+        MessageText.Text = "视觉判断已禁用：生产模式只执行拍照、显示、PLC通信和OK零补偿输出。";
+    }
+
+    private async Task TryLoadBypassLogReferenceTemplateAsync(string productName)
+    {
+        _bypassLogTemplateFeature = null;
+        _bypassLogTemplateImagePath = null;
+        _bypassLogTemplateProductName = null;
+
+        try
+        {
+            var loadedTemplate = await _repository.LoadLatestTemplateAsync(productName);
+            if (loadedTemplate is null)
+            {
+                Log($"日志正反面参考模板未加载: 型号 {productName} 没有模板，只记录当前轮廓形态。");
+                return;
+            }
+
+            var template = _templateImagePathResolver.Resolve(loadedTemplate);
+            if (string.IsNullOrWhiteSpace(template.ImagePath) || !File.Exists(template.ImagePath))
+            {
+                Log($"日志正反面参考模板未加载: 模板图片不存在 {template.ImagePath}");
+                return;
+            }
+
+            if (!string.Equals(template.ImagePath, loadedTemplate.ImagePath, StringComparison.OrdinalIgnoreCase))
+            {
+                Log($"日志正反面参考模板图片已重定位: {loadedTemplate.ImagePath} -> {template.ImagePath}");
+            }
+
+            using var templateImage = new Mat(template.ImagePath, ImreadModes.Grayscale);
+            if (templateImage.Empty())
+            {
+                Log($"日志正反面参考模板未加载: 模板图片读取失败 {template.ImagePath}");
+                return;
+            }
+
+            var recipeLoaded = await LoadRecipeAsync(productName, showMessageWhenMissing: false);
+            if (!recipeLoaded)
+            {
+                ApplyRecipeVisionParameters(template.Parameters);
+                SetChangeoverBackSideNgCheckBox(_visionParameters.BackSideNgEnabled);
+            }
+
+            var activeParameters = ReadVisionParameters();
+            _bypassLogTemplateFeature = _contourFeatureExtractor.Extract(templateImage, activeParameters);
+            _bypassLogTemplateImagePath = template.ImagePath;
+            _bypassLogTemplateProductName = productName.Trim();
+            _template = template with
+            {
+                BatchNo = _currentBatchNo,
+                ProductName = productName.Trim(),
+                Roi = activeParameters.Roi,
+                Parameters = activeParameters
+            };
+            _templateImagePath = template.ImagePath;
+            Log(
+                $"日志正反面参考模板已加载: 型号 {productName}, " +
+                $"图片 {template.ImagePath}, " +
+                $"模板形态 {FormatAutoPartShapeClass(_bypassLogTemplateFeature.Strategy.ShapeClass)}, " +
+                $"半径特征 {_bypassLogTemplateFeature.RadiusSignalPixels:F2}px。");
+        }
+        catch (Exception ex)
+        {
+            Log($"日志正反面参考模板加载失败: {ex.Message}。生产旁路不受影响，只记录当前轮廓形态。");
         }
     }
 

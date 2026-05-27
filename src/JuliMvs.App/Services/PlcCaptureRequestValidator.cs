@@ -25,14 +25,14 @@ internal sealed class PlcCaptureRequestValidator
                 NgReason.CameraError);
         }
 
-        if (!state.TemplateLoaded)
+        if (!state.VisionJudgmentDisabled && !state.TemplateLoaded)
         {
             return PlcCaptureRequestDecision.WriteError(
                 PlcCaptureRequestBlockReason.TemplateMissing,
                 NgReason.PlcError);
         }
 
-        if (!state.BatchCanInspect)
+        if (!state.VisionJudgmentDisabled && !state.BatchCanInspect)
         {
             return PlcCaptureRequestDecision.WriteError(
                 PlcCaptureRequestBlockReason.BatchNotReady,
@@ -48,7 +48,8 @@ internal sealed record PlcCaptureRequestState(
     bool ChangeoverTemplateRequested,
     bool CameraConnected,
     bool TemplateLoaded,
-    bool BatchCanInspect);
+    bool BatchCanInspect,
+    bool VisionJudgmentDisabled = false);
 
 internal sealed record PlcCaptureRequestDecision(
     PlcCaptureRequestAction Action,

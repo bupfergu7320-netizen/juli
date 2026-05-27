@@ -26,6 +26,8 @@ namespace JuliMvs.App;
 
 public partial class MainWindow
 {
+    private static readonly bool VisionJudgmentDisabled = true;
+
     private async Task HandlePlcCaptureRequestAsync()
     {
         Log("收到PLC定位触发D1000=1");
@@ -40,7 +42,8 @@ public partial class MainWindow
                 _changeoverTemplateRequested,
                 _cameraConnected,
                 _template is not null,
-                _batchSession.CanInspect));
+                _batchSession.CanInspect,
+                VisionJudgmentDisabled));
             if (validation.Action != PlcCaptureRequestAction.Proceed)
             {
                 await HandlePlcCaptureRequestValidationFailureAsync(validation);
@@ -311,6 +314,17 @@ public partial class MainWindow
         long captureElapsedMilliseconds = 0,
         Stopwatch? totalStopwatch = null)
     {
+        if (VisionJudgmentDisabled && writeToPlc)
+        {
+            await InspectAndPersistWithoutVisionJudgmentAsync(
+                image,
+                rawImagePath,
+                logPrefix,
+                captureElapsedMilliseconds,
+                totalStopwatch);
+            return;
+        }
+
         if (_template is null)
         {
             throw new InvalidOperationException("请先建立当前型号标准位/模板。");
@@ -411,6 +425,241 @@ public partial class MainWindow
             run.Timings);
     }
 
+    private async Task InspectAndPersistWithoutVisionJudgmentAsync(
+        Mat image,
+        string? rawImagePath,
+        string logPrefix,
+        long captureElapsedMilliseconds,
+        Stopwatch? totalStopwatch)
+    {
+        totalStopwatch ??= Stopwatch.StartNew();
+        var inspectionStopwatch = Stopwatch.StartNew();
+        var contourJudgment = BuildContourJudgment(image);
+        var contourJudgmentText = contourJudgment.LogLine;
+        var result = CreateBypassInspectionResult(rawImagePath, contourJudgment);
+        await _repository.SaveResultAsync(result);
+        inspectionStopwatch.Stop();
+
+        _lastInspectionResult = result;
+        _lastRawImagePath = rawImagePath;
+
+        var renderStopwatch = Stopwatch.StartNew();
+        ResultImage.Source = CreatePreviewBitmapImageFromMat(image);
+        RenderResult(result);
+        renderStopwatch.Stop();
+
+        Log($"{logPrefix}: {result.Decision}: {result.Message}");
+        Log(
+            result.Decision == InspectionDecision.Ng
+                ? "视觉判断旁路试运行: 本次只启用外轮廓镜像正反面NG，XYR仍为零补偿，PLC通信流程不变。"
+                : "视觉判断已禁用: 本次未执行模板、角度、尺寸等判断算法，PLC输出为OK零补偿。");
+        Log(contourJudgmentText);
+
+        var plcStopwatch = Stopwatch.StartNew();
+        await WritePlcResultIfConnectedAsync(result);
+        plcStopwatch.Stop();
+
+        if (result.Decision == InspectionDecision.Ok && result.Measurement is { } measurement)
+        {
+            MessageText.Text = _plcOutputDiagnosticFormatter.BuildOkMessage(
+                measurement,
+                _plcOutputTransform,
+                writeToPlc: true);
+        }
+
+        totalStopwatch.Stop();
+        CountProductionResult(result);
+
+        AddInspectionRuntimeSummary(
+            result,
+            captureElapsedMilliseconds,
+            inspectionStopwatch.ElapsedMilliseconds,
+            renderStopwatch.ElapsedMilliseconds,
+            plcStopwatch.ElapsedMilliseconds,
+            totalStopwatch.ElapsedMilliseconds,
+            new InspectionRunTimings(
+                VisionMs: 0,
+                SaveResultMs: inspectionStopwatch.ElapsedMilliseconds,
+                SaveDiagnosticImageMs: 0,
+                SaveReportMs: 0,
+                VisionStageTimings.Empty),
+            contourJudgmentText);
+    }
+
+    private InspectionResult CreateBypassInspectionResult(
+        string? rawImagePath,
+        ContourJudgmentAnalysis contourJudgment)
+    {
+        if (ShouldApplyBypassBackSideNg(contourJudgment, out var ngMessage))
+        {
+            return VisionJudgmentBypassResultFactory.CreateBackSideNg(
+                _batchSession.BatchNo,
+                ngMessage,
+                rawImagePath);
+        }
+
+        return VisionJudgmentBypassResultFactory.CreateOk(
+            _batchSession.BatchNo,
+            rawImagePath);
+    }
+
+    private bool ShouldApplyBypassBackSideNg(
+        ContourJudgmentAnalysis contourJudgment,
+        out string message)
+    {
+        message = string.Empty;
+        if (!_visionParameters.BackSideNgEnabled)
+        {
+            return false;
+        }
+
+        var frontBackMatch = contourJudgment.FrontBackMatch;
+        if (frontBackMatch is null ||
+            frontBackMatch.Decision != ContourFrontBackDecision.Back ||
+            !frontBackMatch.IsReliable)
+        {
+            return false;
+        }
+
+        message =
+            "反面NG: 外轮廓半径更接近镜像模板，" +
+            $"正面误差={frontBackMatch.FrontErrorPixels:F2}px，" +
+            $"镜像误差={frontBackMatch.BackErrorPixels:F2}px，" +
+            $"分离={frontBackMatch.SeparationPixels:F2}px。";
+        return true;
+    }
+
+    private ContourJudgmentAnalysis BuildContourJudgment(Mat image)
+    {
+        try
+        {
+            var feature = _contourFeatureExtractor.Extract(image, ReadVisionParameters());
+            var frontBack = AnalyzeContourFrontBack(feature);
+            var frontBackSegment = BuildContourFrontBackLogSegment(frontBack);
+            var logLine =
+                "判断: " +
+                $"{FormatAutoPartShapeClass(feature.Strategy.ShapeClass)}，" +
+                $"R={(feature.Strategy.AllowsRCorrection ? "可计算" : "锁定0")}，" +
+                $"方法={FormatAutoAngleMethod(feature.Strategy.Method)}，" +
+                $"中心=({feature.CenterXPixel:F1},{feature.CenterYPixel:F1})px，" +
+                $"轴比={feature.AxisRatio:F3}，" +
+                $"PCA={feature.PcaRatio:F3}，" +
+                $"圆度={feature.Circularity:F3}，" +
+                $"半径特征={feature.RadiusSignalPixels:F2}px" +
+                $"{frontBackSegment}。";
+            return new ContourJudgmentAnalysis(logLine, feature, frontBack.Match);
+        }
+        catch (Exception ex)
+        {
+            return new ContourJudgmentAnalysis($"判断: 外轮廓分析失败，原因={ex.Message}", null, null);
+        }
+    }
+
+    private ContourFrontBackAnalysis AnalyzeContourFrontBack(ContourFeatureExtraction currentFeature)
+    {
+        if (_bypassLogTemplateFeature is null)
+        {
+            return new ContourFrontBackAnalysis("，正反=无参考模板(仅记录)", null);
+        }
+
+        if (!string.IsNullOrWhiteSpace(_bypassLogTemplateProductName) &&
+            !string.Equals(_bypassLogTemplateProductName, _currentProductName.Trim(), StringComparison.OrdinalIgnoreCase))
+        {
+            return new ContourFrontBackAnalysis($"，正反=参考模板型号不一致(仅记录)，参考={_bypassLogTemplateProductName}", null);
+        }
+
+        var match = _contourFrontBackMatcher.Match(currentFeature, _bypassLogTemplateFeature);
+        if (match.Decision == ContourFrontBackDecision.Unavailable)
+        {
+            return new ContourFrontBackAnalysis($"，正反=不可用(仅记录)，原因={SimplifyFrontBackMessage(match.Message)}", match);
+        }
+
+        return new ContourFrontBackAnalysis(
+            $"，正反={FormatContourFrontBackDecision(match.Decision)}({FormatContourFrontBackModeText()})" +
+            $"，正面误差={FormatPixels(match.FrontErrorPixels)}px" +
+            $"，镜像误差={FormatPixels(match.BackErrorPixels)}px" +
+            $"，分离={FormatPixels(match.SeparationPixels)}px",
+            match);
+    }
+
+    private string BuildContourFrontBackLogSegment(ContourFrontBackAnalysis analysis)
+    {
+        return analysis.LogSegment;
+    }
+
+    private string FormatContourFrontBackModeText()
+    {
+        return _visionParameters.BackSideNgEnabled ? "启用反面NG" : "仅记录";
+    }
+
+    private static string FormatContourFrontBackDecision(ContourFrontBackDecision decision)
+    {
+        return decision switch
+        {
+            ContourFrontBackDecision.Front => "正面",
+            ContourFrontBackDecision.Back => "反面",
+            ContourFrontBackDecision.Uncertain => "不确定",
+            ContourFrontBackDecision.Unavailable => "不可用",
+            _ => decision.ToString()
+        };
+    }
+
+    private static string FormatPixels(double value)
+    {
+        return double.IsNaN(value) || double.IsInfinity(value)
+            ? "-"
+            : value.ToString("0.00", CultureInfo.InvariantCulture);
+    }
+
+    private static string SimplifyFrontBackMessage(string message)
+    {
+        const string unavailablePrefix = "正反面判断不可用: ";
+        const string uncertainPrefix = "正反面判断不确定: ";
+        if (message.StartsWith(unavailablePrefix, StringComparison.Ordinal))
+        {
+            return message[unavailablePrefix.Length..].TrimEnd('。');
+        }
+
+        if (message.StartsWith(uncertainPrefix, StringComparison.Ordinal))
+        {
+            return message[uncertainPrefix.Length..].TrimEnd('。');
+        }
+
+        return message.TrimEnd('。');
+    }
+
+    private sealed record ContourJudgmentAnalysis(
+        string LogLine,
+        ContourFeatureExtraction? Feature,
+        ContourFrontBackMatch? FrontBackMatch);
+
+    private sealed record ContourFrontBackAnalysis(
+        string LogSegment,
+        ContourFrontBackMatch? Match);
+
+    private static string FormatAutoPartShapeClass(AutoPartShapeClass shapeClass)
+    {
+        return shapeClass switch
+        {
+            AutoPartShapeClass.StrongEllipse => "明显椭圆",
+            AutoPartShapeClass.IrregularRound => "不规则圆/带缺口",
+            AutoPartShapeClass.WeakEllipse => "无强主方向微椭圆",
+            AutoPartShapeClass.NearCircle => "完美近圆/方向弱",
+            _ => shapeClass.ToString()
+        };
+    }
+
+    private static string FormatAutoAngleMethod(AutoAngleMethod method)
+    {
+        return method switch
+        {
+            AutoAngleMethod.PcaAxis => "长轴/PCA",
+            AutoAngleMethod.ContourPolar => "外轮廓极坐标",
+            AutoAngleMethod.Disabled => "不算R",
+            _ => method.ToString()
+        };
+    }
+
     private async Task WritePlcResultIfConnectedAsync(InspectionResult result)
     {
         try
@@ -479,14 +728,23 @@ public partial class MainWindow
         long renderElapsedMilliseconds,
         long plcElapsedMilliseconds,
         long totalElapsedMilliseconds,
-        InspectionRunTimings timings)
+        InspectionRunTimings timings,
+        string? judgmentLine = null)
     {
-        AddRuntimeLogLines(
+        var lines = new List<string>
+        {
             $"结果: {result.Decision}  原因: {FormatNgReason(result)}",
             $"耗时: 总{totalElapsedMilliseconds}ms  拍照{captureElapsedMilliseconds}ms  检测/存储{inspectionElapsedMilliseconds}ms  显示{renderElapsedMilliseconds}ms  PLC{plcElapsedMilliseconds}ms",
             $"\u660e\u7ec6: \u89c6\u89c9{timings.VisionMs}ms  \u8bb0\u5f55{timings.SaveResultMs}ms  \u56fe{timings.SaveDiagnosticImageMs}ms  \u62a5\u544a{timings.SaveReportMs}ms",
             FormatVisionStageTimingLine(timings.StageTimings),
-            FormatRuntimeXyrLine(result));
+            FormatRuntimeXyrLine(result)
+        };
+        if (!string.IsNullOrWhiteSpace(judgmentLine))
+        {
+            lines.Add(judgmentLine);
+        }
+
+        AddRuntimeLogLines(lines.ToArray());
     }
 
     private static string FormatVisionStageTimingLine(VisionStageTimings timings)
@@ -527,7 +785,7 @@ public partial class MainWindow
 
     private static bool ShouldShowOnRuntimePanel(string line)
     {
-        return IsRuntimeNgLine(line) || IsRuntimeXyrLine(line);
+        return IsRuntimeNgLine(line) || IsRuntimeXyrLine(line) || IsRuntimeJudgmentLine(line);
     }
 
     private static string FormatRuntimeXyrLine(InspectionResult result)
@@ -621,6 +879,11 @@ public partial class MainWindow
     private static bool IsRuntimeXyrLine(string line)
     {
         return line.StartsWith("XYR:", StringComparison.Ordinal);
+    }
+
+    private static bool IsRuntimeJudgmentLine(string line)
+    {
+        return line.StartsWith("判断:", StringComparison.Ordinal);
     }
 
     private PlcOutputCommand CalculatePlcOutputCommand(InspectionMeasurement measurement)

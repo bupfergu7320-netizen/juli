@@ -65,11 +65,30 @@ public partial class MainWindow
             return;
         }
 
-        if (!IsMachineCalibrationReady(out var message))
+        if (!VisionJudgmentDisabled && !IsMachineCalibrationReady(out var message))
         {
             MessageText.Text = message;
             Log(message);
             MessageBox.Show(message, "标定未完成", MessageBoxButton.OK, MessageBoxImage.Warning);
+            return;
+        }
+
+        if (VisionJudgmentDisabled)
+        {
+            if (!_batchSession.CanInspect)
+            {
+                var productName = string.IsNullOrWhiteSpace(_currentProductName)
+                    ? DefaultProductName
+                    : _currentProductName.Trim();
+                StartVisionJudgmentBypassBatch(
+                    BatchNumberGenerator.GenerateDefaultBatchNo(),
+                    productName);
+                await TryLoadBypassLogReferenceTemplateAsync(productName);
+            }
+
+            _productionEnabled = true;
+            UpdateRunStopUi();
+            Log("上位机当前为运行中，视觉判断已禁用，PLC触发将只执行拍照、显示和OK零补偿写入。");
             return;
         }
 
