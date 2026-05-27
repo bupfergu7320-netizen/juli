@@ -22,6 +22,7 @@ VerifyProductionNgSavesOnlyDiagnosticImage();
 VerifyManualInspectionKeepsExistingImageBehavior();
 VerifyClearCalibrationDisablesAllCalibrationButKeepsProductionSettings();
 VerifyProductRecipeKeepsBackSideNgPerProduct();
+VerifyProductRecipeSaveFromTemplateKeepsTemplateBackSideNg();
 VerifyProductRecipeDefaultsAngleDetectionToAuto();
 VerifyAutoAngleStrategyClassifiesMixedRoundParts();
 VerifyProductRecipeClearsLegacyFrontBump();
@@ -335,6 +336,60 @@ static void VerifyProductRecipeKeepsBackSideNgPerProduct()
     AssertBoolEqual(true, applied.CameraCalibration.Enabled, "kept runtime camera calibration");
     AssertBoolEqual(true, applied.RAxisCenterCalibration.Enabled, "kept runtime R-axis calibration");
     AssertBoolEqual(true, applied.InvertRotationCompensation, "kept global R direction");
+}
+
+static void VerifyProductRecipeSaveFromTemplateKeepsTemplateBackSideNg()
+{
+    var runtimeParameters = VisionParameters.Default with
+    {
+        BackSideNgEnabled = true,
+        InvertRotationCompensation = true,
+        CameraCalibration = new CameraCalibration
+        {
+            Enabled = true,
+            CalibrationId = "runtime-camera",
+            SourceDistortionCalibrationId = string.Empty
+        },
+        RAxisCenterCalibration = new RAxisCenterCalibration
+        {
+            Enabled = true,
+            CalibrationId = "runtime-r",
+            SourceCameraCalibrationId = "runtime-camera"
+        }
+    };
+    var templateParameters = VisionParameters.Default with
+    {
+        BackSideNgEnabled = false,
+        AngleDetectionMode = AngleDetectionMode.TemplateRotation
+    };
+    var template = new PartTemplate(
+        Guid.NewGuid(),
+        "BATCH-2",
+        "MODEL-B",
+        "template.bmp",
+        DateTimeOffset.Now,
+        100,
+        100,
+        0,
+        0,
+        "runtime-camera",
+        string.Empty,
+        0,
+        10,
+        10,
+        100,
+        1,
+        ImageRoi.Empty,
+        templateParameters);
+
+    var saved = JuliMvs.Core.Persistence.ProductRecipeVisionParameters.ForSave(template, runtimeParameters);
+
+    AssertBoolEqual(false, saved.BackSideNgEnabled, "template save keeps product backside NG off");
+    AssertBoolEqual(false, saved.InvertRotationCompensation, "template save does not store global R invert");
+    AssertIntEqual(
+        (int)AngleDetectionMode.AutoPcaOrPolarRing,
+        (int)saved.AngleDetectionMode,
+        "template save defaults angle detection to auto");
 }
 
 static void VerifyProductRecipeDefaultsAngleDetectionToAuto()

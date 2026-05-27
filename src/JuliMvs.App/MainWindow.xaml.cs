@@ -126,6 +126,7 @@ public partial class MainWindow : System.Windows.Window
     private ComboBox? _changeoverTemplateSelector;
     private CheckBox? _changeoverBackSideNgCheckBox;
     private bool _changeoverBackSideNgUserEdited;
+    private string? _changeoverBackSideNgEditProductName;
     private bool _updatingChangeoverBackSideNgCheckBox;
     private Button? _changeoverStartButton;
     private Button? _changeoverCaptureTemplateButton;

@@ -24,6 +24,20 @@ public static class ProductRecipeVisionParameters
         };
     }
 
+    public static VisionParameters ForSave(PartTemplate template, VisionParameters runtimeParameters)
+    {
+        var templateParameters = template.Parameters with
+        {
+            LensDistortionCalibration = runtimeParameters.LensDistortionCalibration,
+            CameraCalibration = runtimeParameters.CameraCalibration,
+            RAxisCenterCalibration = runtimeParameters.RAxisCenterCalibration,
+            InvertXCompensation = runtimeParameters.InvertXCompensation,
+            InvertYCompensation = runtimeParameters.InvertYCompensation,
+            InvertRotationCompensation = runtimeParameters.InvertRotationCompensation
+        };
+        return ForSave(templateParameters);
+    }
+
     public static VisionParameters ApplyToRuntime(
         VisionParameters currentRuntimeParameters,
         VisionParameters recipeParameters)

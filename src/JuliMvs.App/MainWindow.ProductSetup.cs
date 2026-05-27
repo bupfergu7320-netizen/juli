@@ -161,7 +161,11 @@ public partial class MainWindow
 
     private Task SaveRecipeAsync(string productName)
     {
-        var parameters = ProductRecipeVisionParameters.ForSave(ReadVisionParameters());
+        var runtimeParameters = ReadVisionParameters();
+        var parameters = _template is not null &&
+            string.Equals(_template.ProductName, productName.Trim(), StringComparison.OrdinalIgnoreCase)
+            ? ProductRecipeVisionParameters.ForSave(_template, runtimeParameters)
+            : ProductRecipeVisionParameters.ForSave(runtimeParameters);
         var recipe = new ProductRecipe
         {
             VisionParameters = parameters,

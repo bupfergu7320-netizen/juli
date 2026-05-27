@@ -14,7 +14,6 @@ public partial class MainWindow
         try
         {
             var productName = (_changeoverModelBox?.Text ?? _currentProductName).Trim();
-            var checkBackSideNg = _changeoverBackSideNgCheckBox?.IsChecked == true;
             if (string.IsNullOrWhiteSpace(productName))
             {
                 throw new InvalidOperationException("型号不能为空，无法加载模板。");
@@ -27,7 +26,8 @@ public partial class MainWindow
 
             _currentProductName = productName;
             var recipeLoaded = await LoadRecipeAsync(productName, showMessageWhenMissing: false);
-            if (_changeoverBackSideNgUserEdited)
+            var checkBackSideNg = _changeoverBackSideNgCheckBox?.IsChecked == true;
+            if (IsChangeoverBackSideNgEditedForProduct(productName))
             {
                 _visionParameters = _visionParameters with
                 {
@@ -110,7 +110,6 @@ public partial class MainWindow
         {
             var batchNo = BatchNumberGenerator.GenerateDefaultBatchNo();
             var productName = (_changeoverModelBox?.Text ?? _currentProductName).Trim();
-            var checkBackSideNg = _changeoverBackSideNgCheckBox?.IsChecked == true;
             if (string.IsNullOrWhiteSpace(productName))
             {
                 throw new InvalidOperationException("型号不能为空。请先输入或选择型号。");
@@ -137,7 +136,8 @@ public partial class MainWindow
             ResetProductionCounters();
             ClearCurrentInspection();
             await LoadRecipeAsync(productName, showMessageWhenMissing: false);
-            if (_changeoverBackSideNgUserEdited)
+            var checkBackSideNg = _changeoverBackSideNgCheckBox?.IsChecked == true;
+            if (IsChangeoverBackSideNgEditedForProduct(productName))
             {
                 _visionParameters = _visionParameters with
                 {
@@ -325,6 +325,8 @@ public partial class MainWindow
         }
 
         _changeoverTemplateRequested = false;
+        _changeoverBackSideNgUserEdited = false;
+        _changeoverBackSideNgEditProductName = null;
         SaveLocalSettings();
         _changeoverStartButton?.SetCurrentValue(IsEnabledProperty, true);
         _changeoverCaptureTemplateButton?.SetCurrentValue(IsEnabledProperty, false);

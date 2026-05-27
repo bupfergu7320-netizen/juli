@@ -41,6 +41,7 @@ public partial class MainWindow
             _changeoverTemplateSelector = null;
             _changeoverBackSideNgCheckBox = null;
             _changeoverBackSideNgUserEdited = false;
+            _changeoverBackSideNgEditProductName = null;
             _updatingChangeoverBackSideNgCheckBox = false;
             _changeoverStartButton = null;
             _changeoverCaptureTemplateButton = null;
@@ -104,6 +105,7 @@ public partial class MainWindow
             if (_changeoverTemplateSelector.SelectedItem is TemplateSelectionItem item)
             {
                 _changeoverModelBox.Text = item.ProductName;
+                _ = LoadChangeoverRecipeStateAsync(item.ProductName);
             }
         };
         Grid.SetRow(_changeoverTemplateSelector, 1);
@@ -254,10 +256,33 @@ public partial class MainWindow
         if (!_updatingChangeoverBackSideNgCheckBox)
         {
             _changeoverBackSideNgUserEdited = true;
+            _changeoverBackSideNgEditProductName = (_changeoverModelBox?.Text ?? _currentProductName).Trim();
         }
     }
 
-    private void SetChangeoverBackSideNgCheckBox(bool enabled)
+    private bool IsChangeoverBackSideNgEditedForProduct(string productName)
+    {
+        return _changeoverBackSideNgUserEdited &&
+            string.Equals(_changeoverBackSideNgEditProductName, productName.Trim(), StringComparison.OrdinalIgnoreCase);
+    }
+
+    private async Task LoadChangeoverRecipeStateAsync(string productName)
+    {
+        if (_changeoverBackSideNgCheckBox is null || string.IsNullOrWhiteSpace(productName))
+        {
+            return;
+        }
+
+        if (IsChangeoverBackSideNgEditedForProduct(productName))
+        {
+            return;
+        }
+
+        var recipe = await _repository.LoadProductRecipeAsync(productName.Trim());
+        SetChangeoverBackSideNgCheckBox(recipe?.VisionParameters.BackSideNgEnabled ?? false, clearUserEdit: true);
+    }
+
+    private void SetChangeoverBackSideNgCheckBox(bool enabled, bool clearUserEdit = false)
     {
         if (_changeoverBackSideNgCheckBox is null)
         {
@@ -272,6 +297,12 @@ public partial class MainWindow
         finally
         {
             _updatingChangeoverBackSideNgCheckBox = false;
+        }
+
+        if (clearUserEdit)
+        {
+            _changeoverBackSideNgUserEdited = false;
+            _changeoverBackSideNgEditProductName = null;
         }
     }
 
