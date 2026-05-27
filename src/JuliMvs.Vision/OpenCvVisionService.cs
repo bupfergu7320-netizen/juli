@@ -845,7 +845,7 @@ public sealed class OpenCvVisionService
 					return MatchContourPolarRotation(detection, templateContourModel, template.ReferenceAngleDegrees, parameters, profileDetail, buildDiagnostics);
 				}
 			}
-			return new ResolvedAngle(profile.PcaAngleDegrees, AllowsFullRotation: true, "auto-pca-contour", CalculatePcaAngleScore(profile.PcaRatio), 0.0, 360.0, null, profileDetail);
+			return new ResolvedAngle(profile.PcaAngleDegrees, AllowsFullRotation: false, "auto-pca-contour", CalculatePcaAngleScore(profile.PcaRatio), 0.0, 180.0, null, profileDetail);
 		}
 		ContourPolarAngleModel contourModel = TryGetContourPolarAngleModel(template, parameters);
 		if ((object)contourModel != null)
