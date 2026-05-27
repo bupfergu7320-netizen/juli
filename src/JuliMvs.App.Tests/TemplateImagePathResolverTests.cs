@@ -22,6 +22,7 @@ VerifyProductionNgSavesOnlyDiagnosticImage();
 VerifyManualInspectionKeepsExistingImageBehavior();
 VerifyClearCalibrationDisablesAllCalibrationButKeepsProductionSettings();
 VerifyProductRecipeKeepsBackSideNgPerProduct();
+VerifyProductRecipeDefaultsAngleDetectionToAuto();
 VerifyProductRecipeClearsLegacyFrontBump();
 VerifyBackSideNgDoesNotRequireSelectedFrontBump();
 VerifyPlcOutputDirectionSettingsApplySimpleXySigns();
@@ -333,6 +334,28 @@ static void VerifyProductRecipeKeepsBackSideNgPerProduct()
     AssertBoolEqual(true, applied.CameraCalibration.Enabled, "kept runtime camera calibration");
     AssertBoolEqual(true, applied.RAxisCenterCalibration.Enabled, "kept runtime R-axis calibration");
     AssertBoolEqual(true, applied.InvertRotationCompensation, "kept global R direction");
+}
+
+static void VerifyProductRecipeDefaultsAngleDetectionToAuto()
+{
+    var legacyRecipe = VisionParameters.Default with
+    {
+        AngleDetectionMode = AngleDetectionMode.OuterContour
+    };
+
+    var saved = JuliMvs.Core.Persistence.ProductRecipeVisionParameters.ForSave(legacyRecipe);
+    var applied = JuliMvs.Core.Persistence.ProductRecipeVisionParameters.ApplyToRuntime(
+        VisionParameters.Default,
+        legacyRecipe);
+
+    AssertIntEqual(
+        (int)AngleDetectionMode.AutoPcaOrPolarRing,
+        (int)saved.AngleDetectionMode,
+        "saved recipe angle detection defaults to auto");
+    AssertIntEqual(
+        (int)AngleDetectionMode.AutoPcaOrPolarRing,
+        (int)applied.AngleDetectionMode,
+        "runtime recipe angle detection defaults to auto");
 }
 
 static void VerifyPlcOutputDirectionSettingsApplySimpleXySigns()

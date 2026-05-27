@@ -14,6 +14,7 @@ public static class ProductRecipeVisionParameters
             LensDistortionCalibration = LensDistortionCalibration.Disabled,
             CameraCalibration = CameraCalibration.Disabled,
             RAxisCenterCalibration = RAxisCenterCalibration.Disabled,
+            AngleDetectionMode = AngleDetectionMode.AutoPcaOrPolarRing,
             TemplateAngleMinimumScoreMargin = Math.Max(
                 parameters.TemplateAngleMinimumScoreMargin,
                 MinimumRuntimeTemplateAngleScoreMargin),
@@ -32,6 +33,7 @@ public static class ProductRecipeVisionParameters
             LensDistortionCalibration = currentRuntimeParameters.LensDistortionCalibration,
             CameraCalibration = currentRuntimeParameters.CameraCalibration,
             RAxisCenterCalibration = currentRuntimeParameters.RAxisCenterCalibration,
+            AngleDetectionMode = AngleDetectionMode.AutoPcaOrPolarRing,
             TemplateAngleMinimumScoreMargin = Math.Max(
                 recipeParameters.TemplateAngleMinimumScoreMargin,
                 MinimumRuntimeTemplateAngleScoreMargin),
