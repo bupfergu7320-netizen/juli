@@ -45,7 +45,7 @@ internal static class ProductionContourReliabilityGuard
         if (matchScore < PreferredContourMatchScoreForR)
         {
             return ProductionContourReliabilityResult.PassWithWarning(
-                $"轮廓匹配分数偏低，分数={matchScore:F3}，建议达到={PreferredContourMatchScoreForR:F3}；已继续做缺料检测。");
+                $"轮廓匹配分数偏低，分数={matchScore:F3}，建议达到={PreferredContourMatchScoreForR:F3}；已继续输出XYR。");
         }
 
         return ProductionContourReliabilityResult.Pass;

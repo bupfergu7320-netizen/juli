@@ -207,7 +207,7 @@ internal sealed class ProductionAutoAngleResolver
             $"角度置信度=模板{templateAxisCheck.Confidence}/来料{currentAxisCheck.Confidence}; " +
             $"模板PCA={templateAxis.RegionAngleDegrees:F2}deg, 模板椭圆={templateAxis.EllipseAngleDegrees:F2}deg, 模板轴比={templateAxis.MeanRatio:F3}; " +
             $"当前PCA={currentAxis.RegionAngleDegrees:F2}deg, 当前椭圆={currentAxis.EllipseAngleDegrees:F2}deg, 当前轴比={currentAxis.MeanRatio:F3}; " +
-            $"主轴R={axisOffset:F2}deg，Chamfer小范围精修R={refinedOffset:F2}deg，缺料对齐R={imageAlignmentOffset:F2}deg，精修差={refineDelta:F2}deg。{refined.Message}";
+            $"主轴R={axisOffset:F2}deg，Chamfer小范围精修R={refinedOffset:F2}deg，图像对齐R={imageAlignmentOffset:F2}deg，精修差={refineDelta:F2}deg。{refined.Message}";
         return ProductionAutoAngleResult.Reliable(
             resolvedAngle,
             refined.CenterXPixel,

@@ -260,23 +260,12 @@ public partial class MainWindow
                 _productionAutoAngleResolver.WarmupTemplate(
                     _bypassLogTemplateFeature,
                     parameters.BackSideNgEnabled);
-                _productionMissingMaterialDetector.WarmupTemplate(
-                    template,
-                    _bypassLogTemplateFeature);
 
                 var selfAngle = _productionAutoAngleResolver.Resolve(
                     _bypassLogTemplateFeature,
                     _bypassLogTemplateFeature,
                     template,
                     fourWaySymmetric: parameters.FourWaySymmetricEnabled);
-                if (selfAngle.IsReliable)
-                {
-                    _ = _productionMissingMaterialDetector.Evaluate(
-                        _bypassLogTemplateFeature,
-                        _bypassLogTemplateFeature,
-                        template,
-                        selfAngle);
-                }
             }
         }
         catch (Exception ex)

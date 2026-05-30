@@ -519,7 +519,7 @@ public partial class MainWindow
 
         if (TryBuildProductionMeasurement(contourJudgment, timings, out var measurement, out var reason, out var ngReason))
         {
-            productionOutputLog = "生产检测: 未发现反面NG/缺料崩边NG，轮廓角度可靠，已输出XYR纠偏。";
+            productionOutputLog = "生产检测: 正反判断通过，轮廓定位可靠，已输出XYR纠偏。";
             return ProductionInspectionResultFactory.CreateOk(
                 _batchSession.BatchNo,
                 measurement,
@@ -637,32 +637,7 @@ public partial class MainWindow
             currentFeature.AreaPixels,
             angleResult.MatchScore);
         Log($"生产Shape配准: {angleResult.Message}");
-        if (angleResult.SkipMissingMaterialDetection)
-        {
-            Log("缺料精检跳过: Shape兜底时不做mask精对齐差分，只保留肉眼可见边缘缺损粗判，避免良品误NG。");
-            return true;
-        }
-
-        var defectStopwatch = Stopwatch.StartNew();
-        var defect = _productionMissingMaterialDetector.Evaluate(
-            currentFeature,
-            templateFeature,
-            template,
-            angleResult,
-            buildDiagnosticOverlay: true);
-        defectStopwatch.Stop();
-        timings.DecisionMilliseconds += defectStopwatch.ElapsedMilliseconds;
-        Log(defect.Message);
-        if (!defect.IsPass)
-        {
-            _pendingProductionNgDiagnosticOverlay?.Dispose();
-            _pendingProductionNgDiagnosticOverlay = defect.DiagnosticOverlay;
-            measurement = CreateZeroProductionMeasurement();
-            reason = defect.Message;
-            ngReason = NgReason.MissingMaterial;
-            return false;
-        }
-
+        Log("缺陷检测已停用: 当前只做旋转平移和XYR输出。");
         return true;
     }
 

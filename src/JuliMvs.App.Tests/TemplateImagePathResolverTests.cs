@@ -88,7 +88,7 @@ VerifyContourFeatureExtractorClassifiesStrongEllipse();
 VerifyContourFeatureExtractorKeepsWeakRoundRDetection();
 VerifyContourRadiusSignatureMatchesRotation();
 VerifyProductionContourReliabilityRejectsFieldAngleJump();
-VerifyProductionContourReliabilityAllowsLowScoreForDefectCheck();
+VerifyProductionContourReliabilityAllowsLowScoreForXyrOutput();
 VerifyProductionContourReliabilityAcceptsReliableContour();
 VerifyProductionContourReliabilityAcceptsLargePositionOffset();
 VerifyProductionContourReliabilityDoesNotLockWeakRoundR();
@@ -910,7 +910,7 @@ static void VerifyProductionContourReliabilityRejectsFieldAngleJump()
         "field angle jump rejection reason");
 }
 
-static void VerifyProductionContourReliabilityAllowsLowScoreForDefectCheck()
+static void VerifyProductionContourReliabilityAllowsLowScoreForXyrOutput()
 {
     var template = CreateProductionReliabilityTemplate();
     var current = CreateContourFeature(
@@ -931,7 +931,7 @@ static void VerifyProductionContourReliabilityAllowsLowScoreForDefectCheck()
         matchScore: 0.208);
 
     AssertBoolEqual(true, result.IsReliable, "field low score still reaches defect check");
-    AssertBoolEqual(true, result.Warning?.Contains("继续做缺料检测", StringComparison.Ordinal) == true, "low score warning");
+    AssertBoolEqual(true, result.Warning?.Contains("继续输出XYR", StringComparison.Ordinal) == true, "low score warning");
 }
 
 static void VerifyProductionContourReliabilityAcceptsReliableContour()

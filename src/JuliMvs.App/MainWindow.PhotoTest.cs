@@ -227,7 +227,7 @@ public partial class MainWindow
         return
             "拍照测试\n" +
             "==============================\n" +
-            "流程: 拍照 -> 外轮廓 -> 正反 -> XYR定位 -> 缺料/崩边 -> PLC预览\n" +
+            "流程: 拍照 -> 外轮廓 -> 正反 -> XYR定位 -> PLC预览\n" +
             "动作: 只计算和显示，不写 PLC。\n\n" +
             $"相机: {(_cameraConnected ? "已连接" : "未连接")}\n" +
             $"PLC: {(_plcClient?.IsConnected == true ? "已连接" : "未连接")}\n" +
