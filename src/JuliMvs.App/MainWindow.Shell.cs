@@ -40,7 +40,7 @@ public partial class MainWindow
             SetCameraStatus("相机通讯未连接", isNormal: false);
             SetPlcStatus("PLC通讯未连接", isNormal: false);
             Log("数据库已初始化");
-            await TryEnterSimpleProductionModeAsync();
+            await TryEnterStartupProductionModeAsync();
             Log("上位机启动后自动连接相机和PLC");
             _ = AutoStartConnectionsAsync();
         }
@@ -250,7 +250,7 @@ public partial class MainWindow
         var isTechnician = _currentUserRole == UserRole.Technician;
         var technicianVisibility = isTechnician ? Visibility.Visible : Visibility.Collapsed;
         TurntablePositionNavButton.Visibility = technicianVisibility;
-        PhotoTestNavButton.Visibility = technicianVisibility;
+        PhotoTestNavButton.Visibility = Visibility.Visible;
         NewBatchButton.Visibility = technicianVisibility;
     }
 

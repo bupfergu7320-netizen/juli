@@ -25,9 +25,24 @@ namespace JuliMvs.App;
 
 public partial class MainWindow
 {
-    private async Task TryEnterSimpleProductionModeAsync()
+    private async Task TryEnterStartupProductionModeAsync()
     {
-        var productName = _currentProductName.Trim();
+        var latestTemplate = await _repository.LoadMostRecentTemplateAsync();
+        if (latestTemplate is null || string.IsNullOrWhiteSpace(latestTemplate.ProductName))
+        {
+            await TryEnterSimpleProductionModeAsync();
+            return;
+        }
+
+        var productName = latestTemplate.ProductName.Trim();
+        _currentProductName = productName;
+        Log($"启动自动加载最近模板: 型号 {productName}, 模板时间 {latestTemplate.CreatedAt:yyyy-MM-dd HH:mm:ss}");
+        await TryEnterSimpleProductionModeAsync(productName);
+    }
+
+    private async Task TryEnterSimpleProductionModeAsync(string? preferredProductName = null)
+    {
+        var productName = (preferredProductName ?? _currentProductName).Trim();
         if (string.IsNullOrWhiteSpace(productName))
         {
             productName = DefaultProductName;
@@ -125,6 +140,7 @@ public partial class MainWindow
             {
                 ApplyRecipeVisionParameters(template.Parameters);
                 SetChangeoverBackSideNgCheckBox(_visionParameters.BackSideNgEnabled);
+                SetChangeoverFourWaySymmetricCheckBox(_visionParameters.FourWaySymmetricEnabled);
             }
 
             var activeParameters = ReadVisionParameters();
@@ -139,11 +155,13 @@ public partial class MainWindow
                 Parameters = activeParameters
             };
             _templateImagePath = template.ImagePath;
+            WarmupProductionTemplate(_template, activeParameters);
             Log(
                 $"日志正反面参考模板已加载: 型号 {productName}, " +
                 $"图片 {template.ImagePath}, " +
                 $"模板形态 {FormatAutoPartShapeClass(_bypassLogTemplateFeature.Strategy.ShapeClass)}, " +
-                $"半径特征 {_bypassLogTemplateFeature.RadiusSignalPixels:F2}px。");
+                $"半径特征 {_bypassLogTemplateFeature.RadiusSignalPixels:F2}px, " +
+                $"四边对称{FormatRecipeFourWaySymmetricState(_visionParameters)}。");
         }
         catch (Exception ex)
         {
@@ -205,6 +223,7 @@ public partial class MainWindow
         {
             ApplyRecipeVisionParameters(loadedTemplate.Parameters);
             SetChangeoverBackSideNgCheckBox(_visionParameters.BackSideNgEnabled);
+            SetChangeoverFourWaySymmetricCheckBox(_visionParameters.FourWaySymmetricEnabled);
         }
 
         var activeParameters = ReadVisionParameters();
@@ -222,6 +241,7 @@ public partial class MainWindow
             Parameters = activeParameters
         };
         _templateImagePath = template.ImagePath;
+        LoadProductionContourReferenceTemplateFromFile(_template, activeParameters);
         RenderTemplateSummary(_template);
         WarmupProductionTemplate(_template, activeParameters);
         Log($"产品模板已加载: {productName}, 来源批次: {template.BatchNo}, 模板时间: {template.CreatedAt:yyyy-MM-dd HH:mm:ss}");
@@ -231,9 +251,61 @@ public partial class MainWindow
     private void WarmupProductionTemplate(PartTemplate template, VisionParameters parameters)
     {
         var startedAt = DateTimeOffset.Now;
-        _visionService.WarmupProductionTemplate(template, parameters);
+        try
+        {
+            _visionService.WarmupProductionTemplate(template, parameters);
+
+            if (_bypassLogTemplateFeature is not null)
+            {
+                _productionAutoAngleResolver.WarmupTemplate(
+                    _bypassLogTemplateFeature,
+                    parameters.BackSideNgEnabled);
+                _productionMissingMaterialDetector.WarmupTemplate(
+                    template,
+                    _bypassLogTemplateFeature);
+
+                var selfAngle = _productionAutoAngleResolver.Resolve(
+                    _bypassLogTemplateFeature,
+                    _bypassLogTemplateFeature,
+                    template,
+                    fourWaySymmetric: parameters.FourWaySymmetricEnabled);
+                if (selfAngle.IsReliable)
+                {
+                    _ = _productionMissingMaterialDetector.Evaluate(
+                        _bypassLogTemplateFeature,
+                        _bypassLogTemplateFeature,
+                        template,
+                        selfAngle);
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            Log($"生产模板缓存预热失败: {ex.Message}。首件可能稍慢，检测流程继续。");
+            return;
+        }
         var elapsedMs = (long)(DateTimeOffset.Now - startedAt).TotalMilliseconds;
         Log($"生产模板缓存已预热: {elapsedMs}ms，首件PLC触发无需再初始化模板/角度缓存。");
+    }
+
+    private void LoadProductionContourReferenceTemplateFromFile(
+        PartTemplate template,
+        VisionParameters parameters)
+    {
+        if (string.IsNullOrWhiteSpace(template.ImagePath) || !File.Exists(template.ImagePath))
+        {
+            throw new InvalidOperationException($"模板图片不存在: {template.ImagePath}");
+        }
+
+        using var templateImage = new Mat(template.ImagePath, ImreadModes.Grayscale);
+        if (templateImage.Empty())
+        {
+            throw new InvalidOperationException($"模板图片读取失败: {template.ImagePath}");
+        }
+
+        _bypassLogTemplateFeature = _contourFeatureExtractor.Extract(templateImage, parameters);
+        _bypassLogTemplateImagePath = template.ImagePath;
+        _bypassLogTemplateProductName = template.ProductName.Trim();
     }
 
     private void RequireMachineCalibrationReady()
@@ -280,9 +352,11 @@ public partial class MainWindow
             _visionParameters = _visionParameters with
             {
                 BackSideNgEnabled = false,
+                FourWaySymmetricEnabled = false,
                 FrontBumpFeature = FrontBumpFeature.Disabled
             };
             SetChangeoverBackSideNgCheckBox(false);
+            SetChangeoverFourWaySymmetricCheckBox(false);
             if (showMessageWhenMissing)
             {
                 MessageBox.Show($"未找到型号配方: {productName}", "提示", MessageBoxButton.OK, MessageBoxImage.Information);
@@ -293,6 +367,7 @@ public partial class MainWindow
 
         ApplyRecipeVisionParameters(recipe.VisionParameters);
         SetChangeoverBackSideNgCheckBox(_visionParameters.BackSideNgEnabled);
+        SetChangeoverFourWaySymmetricCheckBox(_visionParameters.FourWaySymmetricEnabled);
         _cameraSettings = recipe.CameraSettings;
         SaveLocalSettings();
         await ApplyCameraSettingsToConnectedCameraAsync();
@@ -301,7 +376,8 @@ public partial class MainWindow
             $"曝光{_cameraSettings.ExposureTimeMicroseconds:F1}us，" +
             $"增益{_cameraSettings.Gain:F1}，" +
             $"曝光延迟{_cameraSettings.CaptureDelaySeconds:F3}s，" +
-            $"反面NG{FormatRecipeBackSideNgState(_visionParameters)}");
+            $"反面NG{FormatRecipeBackSideNgState(_visionParameters)}，" +
+            $"四边对称{FormatRecipeFourWaySymmetricState(_visionParameters)}");
         return true;
     }
 
@@ -313,5 +389,12 @@ public partial class MainWindow
         }
 
         return "已启用，轮廓采样镜像匹配";
+    }
+
+    private static string FormatRecipeFourWaySymmetricState(VisionParameters parameters)
+    {
+        return parameters.FourWaySymmetricEnabled
+            ? "已启用，R按180°等价"
+            : "未启用";
     }
 }

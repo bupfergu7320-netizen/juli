@@ -40,9 +40,13 @@ public partial class MainWindow
             _changeoverSummaryText = null;
             _changeoverTemplateSelector = null;
             _changeoverBackSideNgCheckBox = null;
+            _changeoverFourWaySymmetricCheckBox = null;
             _changeoverBackSideNgUserEdited = false;
+            _changeoverFourWaySymmetricUserEdited = false;
             _changeoverBackSideNgEditProductName = null;
+            _changeoverFourWaySymmetricEditProductName = null;
             _updatingChangeoverBackSideNgCheckBox = false;
+            _updatingChangeoverFourWaySymmetricCheckBox = false;
             _changeoverStartButton = null;
             _changeoverCaptureTemplateButton = null;
             _changeoverCancelButton = null;
@@ -146,9 +150,25 @@ public partial class MainWindow
         };
         _changeoverBackSideNgCheckBox.Checked += (_, _) => MarkChangeoverBackSideNgUserEdited();
         _changeoverBackSideNgCheckBox.Unchecked += (_, _) => MarkChangeoverBackSideNgUserEdited();
+        _changeoverBackSideNgCheckBox.Content = "检查正反面";
         Grid.SetRow(_changeoverBackSideNgCheckBox, 2);
         Grid.SetColumnSpan(_changeoverBackSideNgCheckBox, 2);
         header.Children.Add(_changeoverBackSideNgCheckBox);
+
+        _changeoverFourWaySymmetricCheckBox = new CheckBox
+        {
+            Content = "四边对称（R按180°等价）",
+            IsChecked = _visionParameters.FourWaySymmetricEnabled,
+            FontSize = 22,
+            FontWeight = FontWeights.Bold,
+            VerticalContentAlignment = VerticalAlignment.Center,
+            Margin = new Thickness(0, 152, 0, 0)
+        };
+        _changeoverFourWaySymmetricCheckBox.Checked += (_, _) => MarkChangeoverFourWaySymmetricUserEdited();
+        _changeoverFourWaySymmetricCheckBox.Unchecked += (_, _) => MarkChangeoverFourWaySymmetricUserEdited();
+        Grid.SetRow(_changeoverFourWaySymmetricCheckBox, 2);
+        Grid.SetColumnSpan(_changeoverFourWaySymmetricCheckBox, 2);
+        header.Children.Add(_changeoverFourWaySymmetricCheckBox);
 
         root.Children.Add(header);
 
@@ -260,26 +280,44 @@ public partial class MainWindow
         }
     }
 
+    private void MarkChangeoverFourWaySymmetricUserEdited()
+    {
+        if (!_updatingChangeoverFourWaySymmetricCheckBox)
+        {
+            _changeoverFourWaySymmetricUserEdited = true;
+            _changeoverFourWaySymmetricEditProductName = (_changeoverModelBox?.Text ?? _currentProductName).Trim();
+        }
+    }
+
     private bool IsChangeoverBackSideNgEditedForProduct(string productName)
     {
         return _changeoverBackSideNgUserEdited &&
             string.Equals(_changeoverBackSideNgEditProductName, productName.Trim(), StringComparison.OrdinalIgnoreCase);
     }
 
+    private bool IsChangeoverFourWaySymmetricEditedForProduct(string productName)
+    {
+        return _changeoverFourWaySymmetricUserEdited &&
+            string.Equals(_changeoverFourWaySymmetricEditProductName, productName.Trim(), StringComparison.OrdinalIgnoreCase);
+    }
+
     private async Task LoadChangeoverRecipeStateAsync(string productName)
     {
-        if (_changeoverBackSideNgCheckBox is null || string.IsNullOrWhiteSpace(productName))
+        if ((_changeoverBackSideNgCheckBox is null && _changeoverFourWaySymmetricCheckBox is null) ||
+            string.IsNullOrWhiteSpace(productName))
         {
             return;
         }
 
-        if (IsChangeoverBackSideNgEditedForProduct(productName))
+        if (IsChangeoverBackSideNgEditedForProduct(productName) ||
+            IsChangeoverFourWaySymmetricEditedForProduct(productName))
         {
             return;
         }
 
         var recipe = await _repository.LoadProductRecipeAsync(productName.Trim());
         SetChangeoverBackSideNgCheckBox(recipe?.VisionParameters.BackSideNgEnabled ?? false, clearUserEdit: true);
+        SetChangeoverFourWaySymmetricCheckBox(recipe?.VisionParameters.FourWaySymmetricEnabled ?? false, clearUserEdit: true);
     }
 
     private void SetChangeoverBackSideNgCheckBox(bool enabled, bool clearUserEdit = false)
@@ -303,6 +341,30 @@ public partial class MainWindow
         {
             _changeoverBackSideNgUserEdited = false;
             _changeoverBackSideNgEditProductName = null;
+        }
+    }
+
+    private void SetChangeoverFourWaySymmetricCheckBox(bool enabled, bool clearUserEdit = false)
+    {
+        if (_changeoverFourWaySymmetricCheckBox is null)
+        {
+            return;
+        }
+
+        _updatingChangeoverFourWaySymmetricCheckBox = true;
+        try
+        {
+            _changeoverFourWaySymmetricCheckBox.IsChecked = enabled;
+        }
+        finally
+        {
+            _updatingChangeoverFourWaySymmetricCheckBox = false;
+        }
+
+        if (clearUserEdit)
+        {
+            _changeoverFourWaySymmetricUserEdited = false;
+            _changeoverFourWaySymmetricEditProductName = null;
         }
     }
 

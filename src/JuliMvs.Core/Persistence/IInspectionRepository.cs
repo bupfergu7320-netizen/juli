@@ -11,6 +11,8 @@ public interface IInspectionRepository
 
     Task<PartTemplate?> LoadLatestTemplateAsync(string productName, CancellationToken cancellationToken = default);
 
+    Task<PartTemplate?> LoadMostRecentTemplateAsync(CancellationToken cancellationToken = default);
+
     Task<IReadOnlyList<PartTemplate>> LoadTemplatesAsync(CancellationToken cancellationToken = default);
 
     Task SaveResultAsync(InspectionResult result, CancellationToken cancellationToken = default);

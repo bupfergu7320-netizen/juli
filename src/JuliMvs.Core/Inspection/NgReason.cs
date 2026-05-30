@@ -11,5 +11,6 @@ public enum NgReason
     PlcError = 6,
     AlgorithmError = 7,
     BackSideDetected = 8,
-    FrontBumpMissing = 9
+    FrontBumpMissing = 9,
+    MissingMaterial = 10
 }

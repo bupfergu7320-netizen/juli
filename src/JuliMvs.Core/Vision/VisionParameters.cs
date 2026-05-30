@@ -52,6 +52,8 @@ public sealed record VisionParameters
 
     public bool BackSideNgEnabled { get; init; }
 
+    public bool FourWaySymmetricEnabled { get; init; }
+
     public FrontBumpFeature FrontBumpFeature { get; init; } = FrontBumpFeature.Disabled;
 
     public double BackSideNgMinimumBackScore { get; init; } = 0.0;

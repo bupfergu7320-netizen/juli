@@ -95,6 +95,8 @@ internal sealed record MachineSettings
 
     public bool BackSideNgEnabled { get; init; }
 
+    public bool FourWaySymmetricEnabled { get; init; }
+
     public double BackSideNgMinimumBackScore { get; init; } =
         VisionParameters.Default.BackSideNgMinimumBackScore;
 

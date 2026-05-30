@@ -25,23 +25,29 @@ public partial class MainWindow
                 throw new InvalidOperationException("请先点击左侧“停止”，再加载已有标准位/模板。");
             }
 
+            var checkBackSideNg = _changeoverBackSideNgCheckBox?.IsChecked == true;
+            var fourWaySymmetric = _changeoverFourWaySymmetricCheckBox?.IsChecked == true;
+            var backSideNgEdited = IsChangeoverBackSideNgEditedForProduct(productName);
+            var fourWaySymmetricEdited = IsChangeoverFourWaySymmetricEditedForProduct(productName);
             _currentProductName = productName;
             var recipeLoaded = await LoadRecipeAsync(productName, showMessageWhenMissing: false);
-            var checkBackSideNg = _changeoverBackSideNgCheckBox?.IsChecked == true;
-            if (IsChangeoverBackSideNgEditedForProduct(productName))
+            if (backSideNgEdited || fourWaySymmetricEdited)
             {
                 _visionParameters = _visionParameters with
                 {
-                    BackSideNgEnabled = checkBackSideNg,
+                    BackSideNgEnabled = backSideNgEdited ? checkBackSideNg : _visionParameters.BackSideNgEnabled,
+                    FourWaySymmetricEnabled = fourWaySymmetricEdited ? fourWaySymmetric : _visionParameters.FourWaySymmetricEnabled,
                     FrontBumpFeature = FrontBumpFeature.Disabled
                 };
-                SetChangeoverBackSideNgCheckBox(checkBackSideNg);
+                SetChangeoverBackSideNgCheckBox(_visionParameters.BackSideNgEnabled);
+                SetChangeoverFourWaySymmetricCheckBox(_visionParameters.FourWaySymmetricEnabled);
                 await SaveRecipeAsync(productName);
-                Log($"型号反面NG设置已保存: {productName}, {FormatProductBackSideNgSummary(checkBackSideNg)}");
+                Log($"型号检测设置已保存: {productName}, 反面NG={FormatProductBackSideNgSummary(_visionParameters.BackSideNgEnabled)}, 四边对称={FormatProductFourWaySymmetricSummary(_visionParameters.FourWaySymmetricEnabled)}");
             }
             else if (!recipeLoaded)
             {
                 SetChangeoverBackSideNgCheckBox(_visionParameters.BackSideNgEnabled);
+                SetChangeoverFourWaySymmetricCheckBox(_visionParameters.FourWaySymmetricEnabled);
             }
 
             var batchNo = BatchNumberGenerator.GenerateDefaultBatchNo();
@@ -67,6 +73,7 @@ public partial class MainWindow
                         $"型号: {productName}\n" +
                         $"批次: {batchNo}\n" +
                         $"反面NG: {FormatProductBackSideNgSummary(_visionParameters.BackSideNgEnabled)}\n" +
+                        $"四边对称: {FormatProductFourWaySymmetricSummary(_visionParameters.FourWaySymmetricEnabled)}\n" +
                         "状态: 已加载当前型号标准位/模板\n" +
                         templateBaselineSummary +
                         "机器方向: " +
@@ -136,16 +143,21 @@ public partial class MainWindow
             _batchSession.Start(batchNo, productName);
             ResetProductionCounters();
             ClearCurrentInspection();
-            await LoadRecipeAsync(productName, showMessageWhenMissing: false);
             var checkBackSideNg = _changeoverBackSideNgCheckBox?.IsChecked == true;
-            if (IsChangeoverBackSideNgEditedForProduct(productName))
+            var fourWaySymmetric = _changeoverFourWaySymmetricCheckBox?.IsChecked == true;
+            var backSideNgEdited = IsChangeoverBackSideNgEditedForProduct(productName);
+            var fourWaySymmetricEdited = IsChangeoverFourWaySymmetricEditedForProduct(productName);
+            await LoadRecipeAsync(productName, showMessageWhenMissing: false);
+            if (backSideNgEdited || fourWaySymmetricEdited)
             {
                 _visionParameters = _visionParameters with
                 {
-                    BackSideNgEnabled = checkBackSideNg,
+                    BackSideNgEnabled = backSideNgEdited ? checkBackSideNg : _visionParameters.BackSideNgEnabled,
+                    FourWaySymmetricEnabled = fourWaySymmetricEdited ? fourWaySymmetric : _visionParameters.FourWaySymmetricEnabled,
                     FrontBumpFeature = FrontBumpFeature.Disabled
                 };
-                SetChangeoverBackSideNgCheckBox(checkBackSideNg);
+                SetChangeoverBackSideNgCheckBox(_visionParameters.BackSideNgEnabled);
+                SetChangeoverFourWaySymmetricCheckBox(_visionParameters.FourWaySymmetricEnabled);
             }
             await SaveRecipeAsync(productName);
 
@@ -164,6 +176,7 @@ public partial class MainWindow
                     $"型号: {productName}\n" +
                     $"批次: {batchNo}\n" +
                     $"反面NG: {FormatProductBackSideNgSummary(_visionParameters.BackSideNgEnabled)}\n" +
+                    $"四边对称: {FormatProductFourWaySymmetricSummary(_visionParameters.FourWaySymmetricEnabled)}\n" +
                     "状态: 等待上位机拍照建立标准位/模板\n" +
                     "当前型号标准位: 等待保存X/Y/R");
         }
@@ -270,11 +283,13 @@ public partial class MainWindow
         parameters = parameters with
         {
             BackSideNgEnabled = _changeoverBackSideNgCheckBox?.IsChecked == true,
+            FourWaySymmetricEnabled = _changeoverFourWaySymmetricCheckBox?.IsChecked == true,
             FrontBumpFeature = FrontBumpFeature.Disabled
         };
         _visionParameters = _visionParameters with
         {
             BackSideNgEnabled = parameters.BackSideNgEnabled,
+            FourWaySymmetricEnabled = parameters.FourWaySymmetricEnabled,
             FrontBumpFeature = FrontBumpFeature.Disabled
         };
         var template = _visionService.CreateTemplate(
@@ -328,7 +343,9 @@ public partial class MainWindow
 
         _changeoverTemplateRequested = false;
         _changeoverBackSideNgUserEdited = false;
+        _changeoverFourWaySymmetricUserEdited = false;
         _changeoverBackSideNgEditProductName = null;
+        _changeoverFourWaySymmetricEditProductName = null;
         SaveLocalSettings();
         _changeoverStartButton?.SetCurrentValue(IsEnabledProperty, true);
         _changeoverCaptureTemplateButton?.SetCurrentValue(IsEnabledProperty, false);
@@ -348,6 +365,7 @@ public partial class MainWindow
                 $"型号: {_template.ProductName}\n" +
                 $"批次: {_template.BatchNo}\n" +
                 $"反面NG: {FormatProductBackSideNgSummary(_visionParameters.BackSideNgEnabled)}\n" +
+                $"四边对称: {FormatProductFourWaySymmetricSummary(_visionParameters.FourWaySymmetricEnabled)}\n" +
                 $"{InspectionDiagnosticMessageFormatter.FormatTemplateBaselineSummary(_template)}\n" +
                 $"宽度: {_template.WidthMm:F3}mm\n" +
                 $"高度: {_template.HeightMm:F3}mm\n" +
@@ -389,6 +407,7 @@ public partial class MainWindow
         _bypassLogTemplateFeature = _contourFeatureExtractor.Extract(templateImage, parameters);
         _bypassLogTemplateImagePath = template.ImagePath;
         _bypassLogTemplateProductName = template.ProductName.Trim();
+        WarmupProductionTemplate(template, parameters);
         Log(
             $"生产正反/XYR参考模板已更新: 型号 {_bypassLogTemplateProductName}, " +
             $"图片 {template.ImagePath}, " +
@@ -399,6 +418,11 @@ public partial class MainWindow
     private static string FormatProductBackSideNgSummary(bool enabled)
     {
         return enabled ? "已启用（反面判NG）" : "未启用（正反面对称/不检查）";
+    }
+
+    private static string FormatProductFourWaySymmetricSummary(bool enabled)
+    {
+        return enabled ? "已启用（R按180°等价）" : "未启用（Shape完整R）";
     }
 
 }

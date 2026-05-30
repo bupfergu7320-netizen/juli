@@ -171,7 +171,9 @@ public partial class MainWindow
             InvertXCompensation = settings.InvertXCompensation,
             InvertYCompensation = settings.InvertYCompensation,
             InvertRotationCompensation = settings.InvertRotationCompensation ||
-                (settings.PlcOutputTransform?.RScale < 0.0)
+                (settings.PlcOutputTransform?.RScale < 0.0),
+            BackSideNgEnabled = settings.BackSideNgEnabled,
+            FourWaySymmetricEnabled = settings.FourWaySymmetricEnabled
         };
         _plcOutputTransform = NormalizePlcOutputTransform(settings.PlcOutputTransform ?? PlcOutputTransform.Identity);
         ApplyCalibrationToUi(settings.CameraCalibration);
@@ -273,6 +275,8 @@ public partial class MainWindow
             InvertXCompensation = _visionParameters.InvertXCompensation,
             InvertYCompensation = _visionParameters.InvertYCompensation,
             InvertRotationCompensation = _visionParameters.InvertRotationCompensation,
+            BackSideNgEnabled = _visionParameters.BackSideNgEnabled,
+            FourWaySymmetricEnabled = _visionParameters.FourWaySymmetricEnabled,
             PlcOutputTransform = _plcOutputTransform
         };
     }

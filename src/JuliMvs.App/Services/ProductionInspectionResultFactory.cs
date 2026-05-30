@@ -5,7 +5,6 @@ namespace JuliMvs.App.Services;
 internal static class ProductionInspectionResultFactory
 {
     public const string OkMessage = "OK，正反面检测通过，输出XYR纠偏。";
-    public const string ZeroCorrectionOkMessage = "OK，正反面检测通过，XYR不可用，零补偿输出。";
 
     public static InspectionResult CreateOk(
         string? batchNo,
@@ -26,19 +25,6 @@ internal static class ProductionInspectionResultFactory
             rawImagePath);
     }
 
-    public static InspectionResult CreateOk(
-        string? batchNo,
-        string? rawImagePath = null,
-        string? partNo = null)
-    {
-        return CreateOk(
-            batchNo,
-            CreateZeroMeasurement(),
-            ZeroCorrectionOkMessage,
-            rawImagePath,
-            partNo);
-    }
-
     public static InspectionResult CreateBackSideNg(
         string? batchNo,
         string message,
@@ -52,6 +38,25 @@ internal static class ProductionInspectionResultFactory
                 : partNo.Trim(),
             InspectionDecision.Ng,
             NgReason.BackSideDetected,
+            message,
+            CreateZeroMeasurement(),
+            rawImagePath);
+    }
+
+    public static InspectionResult CreateUnsafeXyrNg(
+        string? batchNo,
+        string message,
+        string? rawImagePath = null,
+        string? partNo = null,
+        NgReason ngReason = NgReason.MatchFailed)
+    {
+        return InspectionResult.FromMeasurement(
+            string.IsNullOrWhiteSpace(batchNo) ? "PLC-ONLY" : batchNo.Trim(),
+            string.IsNullOrWhiteSpace(partNo)
+                ? DateTimeOffset.Now.ToString("yyyyMMddHHmmssfff")
+                : partNo.Trim(),
+            InspectionDecision.Ng,
+            ngReason,
             message,
             CreateZeroMeasurement(),
             rawImagePath);

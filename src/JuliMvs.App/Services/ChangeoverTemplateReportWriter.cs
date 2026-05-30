@@ -117,7 +117,9 @@ internal sealed class ChangeoverTemplateReportWriter
                 parameters.InvertYCompensation,
                 parameters.InvertRotationCompensation,
                 parameters.BackSideNgEnabled,
-                BackSideNgRule = "外轮廓半径序列镜像匹配；旧的人工凸起特征不参与判断。"
+                parameters.FourWaySymmetricEnabled,
+                FourWaySymmetricRule = "启用后生产XYR仍输出R，但R按180°等价解释；适合上下、左右对称但仍需要入模角度的工件。",
+                BackSideNgRule = "正面Shape模型与镜像Shape模型匹配；旧的人工凸起特征和旧半径序列正反算法不参与判断。"
             },
             ReplayInputs = new
             {

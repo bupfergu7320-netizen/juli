@@ -60,7 +60,8 @@ public partial class MainWindow : System.Windows.Window
 
     private readonly OpenCvVisionService _visionService = new();
     private readonly ContourFeatureExtractor _contourFeatureExtractor = new();
-    private readonly ContourFrontBackMatcher _contourFrontBackMatcher = new();
+    private readonly ProductionAutoAngleResolver _productionAutoAngleResolver = new();
+    private readonly ProductionMissingMaterialDetector _productionMissingMaterialDetector = new();
     private readonly CalibrationBoardVisionService _calibrationBoardVisionService = new();
     private readonly LensDistortionCalibrationService _lensDistortionCalibrationService = new();
     private readonly CombinedCalibrationService _combinedCalibrationService = new();
@@ -113,6 +114,7 @@ public partial class MainWindow : System.Windows.Window
     private PlcOutputTransform _plcOutputTransform = PlcOutputTransform.Identity;
     private InspectionResult? _lastInspectionResult;
     private string? _lastRawImagePath;
+    private Mat? _pendingProductionNgDiagnosticOverlay;
     private ContourFeatureExtraction? _bypassLogTemplateFeature;
     private string? _bypassLogTemplateImagePath;
     private string? _bypassLogTemplateProductName;
@@ -130,9 +132,13 @@ public partial class MainWindow : System.Windows.Window
     private TextBlock? _changeoverSummaryText;
     private ComboBox? _changeoverTemplateSelector;
     private CheckBox? _changeoverBackSideNgCheckBox;
+    private CheckBox? _changeoverFourWaySymmetricCheckBox;
     private bool _changeoverBackSideNgUserEdited;
+    private bool _changeoverFourWaySymmetricUserEdited;
     private string? _changeoverBackSideNgEditProductName;
+    private string? _changeoverFourWaySymmetricEditProductName;
     private bool _updatingChangeoverBackSideNgCheckBox;
+    private bool _updatingChangeoverFourWaySymmetricCheckBox;
     private Button? _changeoverStartButton;
     private Button? _changeoverCaptureTemplateButton;
     private Button? _changeoverCancelButton;

@@ -218,6 +218,31 @@ public sealed class SqliteInspectionRepository : IInspectionRepository
         return templates;
     }
 
+    public async Task<PartTemplate?> LoadMostRecentTemplateAsync(CancellationToken cancellationToken = default)
+    {
+        await using var connection = new SqliteConnection(_connectionString);
+        await connection.OpenAsync(cancellationToken);
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT Id, BatchNo, ProductName, ImagePath, CreatedAt,
+                   ReferenceCenterXPixel, ReferenceCenterYPixel, ReferenceCenterXMm, ReferenceCenterYMm,
+                   SourceCameraCalibrationId, SourceDistortionCalibrationId,
+                   ReferenceAngleDegrees, ReferenceWidthPixels, ReferenceHeightPixels,
+                   WidthMm, HeightMm, AreaPixels, MatchScoreBaseline, ParametersJson
+            FROM Templates
+            ORDER BY datetime(CreatedAt) DESC, CreatedAt DESC
+            LIMIT 1;
+            """;
+
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        if (!await reader.ReadAsync(cancellationToken))
+        {
+            return null;
+        }
+
+        return ReadTemplate(reader);
+    }
+
     public async Task SaveResultAsync(InspectionResult result, CancellationToken cancellationToken = default)
     {
         await using var connection = new SqliteConnection(_connectionString);

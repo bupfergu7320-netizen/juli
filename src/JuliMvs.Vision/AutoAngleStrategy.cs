@@ -44,21 +44,6 @@ public static class AutoAngleStrategy
         var axisRatio = CalculateAxisRatio(widthPixels, heightPixels);
         var hasContourDirection = templateRadiusSignalPixels >= MinimumContourRadiusSignalPixels;
 
-        if (axisRatio < NearCircleMaximumAxisRatio &&
-            circularity >= NearCircleMinimumCircularity &&
-            !hasContourDirection)
-        {
-            return new AutoAngleStrategyDecision(
-                AutoPartShapeClass.NearCircle,
-                AutoAngleMethod.Disabled,
-                AllowsRCorrection: false,
-                axisRatio,
-                pcaRatio,
-                circularity,
-                templateRadiusSignalPixels,
-                "自动判断为近圆：无稳定方向特征，R锁定为0。");
-        }
-
         if (axisRatio >= StrongEllipseAxisRatio && pcaRatio >= StrongPcaRatio)
         {
             return new AutoAngleStrategyDecision(
@@ -86,32 +71,32 @@ public static class AutoAngleStrategy
                 circularity,
                 templateRadiusSignalPixels,
                 shapeClass == AutoPartShapeClass.WeakEllipse
-                    ? "自动判断为无强主方向微椭圆：使用轮廓极坐标方向，候选不唯一时判NG。"
-                    : "自动判断为不规则圆/带缺口：使用外轮廓极坐标方向。");
+                    ? "自动判断为无强主方向微椭圆：使用Shape轮廓配准，候选不唯一时判NG。"
+                    : "自动判断为不规则圆/带缺口：使用Shape轮廓配准。");
         }
 
         if (axisRatio >= WeakEllipseAxisRatio)
         {
             return new AutoAngleStrategyDecision(
                 AutoPartShapeClass.WeakEllipse,
-                AutoAngleMethod.Disabled,
-                AllowsRCorrection: false,
+                AutoAngleMethod.ContourPolar,
+                AllowsRCorrection: true,
                 axisRatio,
                 pcaRatio,
                 circularity,
                 templateRadiusSignalPixels,
-                "自动判断为无强主方向微椭圆：缺少稳定轮廓方向特征，R锁定为0。");
+                "自动判断为弱方向微椭圆：项目要求检测R，使用Shape轮廓配准；方向不可靠时判NG。");
         }
 
         return new AutoAngleStrategyDecision(
-            AutoPartShapeClass.NearCircle,
-            AutoAngleMethod.Disabled,
-            AllowsRCorrection: false,
+            AutoPartShapeClass.IrregularRound,
+            AutoAngleMethod.ContourPolar,
+            AllowsRCorrection: true,
             axisRatio,
             pcaRatio,
             circularity,
             templateRadiusSignalPixels,
-            "自动判断为近圆/方向弱：R锁定为0。");
+            "自动判断为弱方向不规则圆：项目要求检测R，使用Shape轮廓配准；方向不可靠时判NG。");
     }
 
     private static double CalculateAxisRatio(double widthPixels, double heightPixels)

@@ -329,36 +329,60 @@
                                        FontWeight="Bold"
                                        TextWrapping="Wrap" />
                         </Grid>
-                        <TextBlock Grid.Row="2"
-                                   Text="NG / NG原因 / XYR"
-                                   FontSize="24"
-                                   FontWeight="Bold"
-                                   Foreground="#005A9E"
-                                   Margin="8,0,8,8" />
-                        <ListBox x:Name="LogList"
-                                 Grid.Row="2"
-                                 FontFamily="SimSun"
-                                 FontSize="24"
-                                 Background="White"
-                                 Foreground="Black"
-                                 BorderBrush="#A0A0A0"
-                                 Margin="8,42,8,8"
-                                 ScrollViewer.VerticalScrollBarVisibility="Auto"
-                                 ScrollViewer.HorizontalScrollBarVisibility="Disabled">
-                            <ListBox.ItemContainerStyle>
-                                <Style TargetType="ListBoxItem">
-                                    <Setter Property="HorizontalContentAlignment" Value="Stretch" />
-                                </Style>
-                            </ListBox.ItemContainerStyle>
-                            <ListBox.ItemTemplate>
-                                <DataTemplate>
-                                    <TextBlock Text="{Binding DisplayText}"
-                                               Foreground="{Binding Foreground}"
-                                               FontWeight="{Binding FontWeight}"
+                        <Grid Grid.Row="2" Margin="8,0,8,8">
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="*" />
+                                <RowDefinition Height="*" />
+                            </Grid.RowDefinitions>
+                            <Border Grid.Row="0"
+                                    Background="White"
+                                    BorderBrush="#A0A0A0"
+                                    BorderThickness="1"
+                                    Padding="10"
+                                    Margin="0,0,0,6">
+                                <Grid>
+                                    <Grid.RowDefinitions>
+                                        <RowDefinition Height="Auto" />
+                                        <RowDefinition Height="*" />
+                                    </Grid.RowDefinitions>
+                                    <TextBlock Text="模板属性"
+                                               FontSize="24"
+                                               FontWeight="Bold"
+                                               Foreground="#005A9E"
+                                               Margin="0,0,0,6" />
+                                    <TextBlock x:Name="RuntimeTemplateText"
+                                               Grid.Row="1"
+                                               Text="模板: -"
+                                               FontSize="22"
+                                               FontWeight="Bold"
                                                TextWrapping="Wrap" />
-                                </DataTemplate>
-                            </ListBox.ItemTemplate>
-                        </ListBox>
+                                </Grid>
+                            </Border>
+                            <Border Grid.Row="1"
+                                    Background="White"
+                                    BorderBrush="#A0A0A0"
+                                    BorderThickness="1"
+                                    Padding="10"
+                                    Margin="0,6,0,0">
+                                <Grid>
+                                    <Grid.RowDefinitions>
+                                        <RowDefinition Height="Auto" />
+                                        <RowDefinition Height="*" />
+                                    </Grid.RowDefinitions>
+                                    <TextBlock Text="当前来料"
+                                               FontSize="24"
+                                               FontWeight="Bold"
+                                               Foreground="#005A9E"
+                                               Margin="0,0,0,6" />
+                                    <TextBlock x:Name="RuntimeCurrentPartText"
+                                               Grid.Row="1"
+                                               Text="当前: -"
+                                               FontSize="22"
+                                               FontWeight="Bold"
+                                               TextWrapping="Wrap" />
+                                </Grid>
+                            </Border>
+                        </Grid>
                     </Grid>
                 </Grid>
             </GroupBox>

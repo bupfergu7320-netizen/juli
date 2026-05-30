@@ -73,8 +73,8 @@ public partial class MainWindow
             requestStopwatch.Stop();
             AddRuntimeLogLines(
                 $"结果: Error  原因: {ex.Message}",
-                $"耗时: 总{requestStopwatch.ElapsedMilliseconds}ms  拍照{captureElapsedMilliseconds}ms",
-                "XYR: 无有效测量值");
+                $"耗时: 总{requestStopwatch.ElapsedMilliseconds}ms 拍照{captureElapsedMilliseconds}ms",
+                "XYR: -");
             try
             {
                 await WritePlcErrorResultAsync($"PLC触发检测异常: {ex.Message}", NgReason.AlgorithmError);
@@ -235,12 +235,17 @@ public partial class MainWindow
         _templateImagePath = null;
         _lastInspectionResult = null;
         _lastRawImagePath = null;
+        ClearPendingProductionNgDiagnosticOverlay();
         ResultImage.Source = null;
+        RuntimeTemplateText.Text = "模板: -";
+        RuntimeCurrentPartText.Text = "当前: -";
+        RuntimeCurrentPartText.Foreground = Brushes.Black;
     }
 
     private void RenderTemplateSummary(PartTemplate template)
     {
         Log($"当前型号标准位: X={template.ReferenceCenterXMm:F3}mm, Y={template.ReferenceCenterYMm:F3}mm, R={template.ReferenceAngleDegrees:F3}deg; 像素中心=({template.ReferenceCenterXPixel:F1}px,{template.ReferenceCenterYPixel:F1}px)");
+        UpdateRuntimeTemplatePanel(template);
     }
 
     private void UpdateBatchUi()
@@ -435,17 +440,30 @@ public partial class MainWindow
     {
         totalStopwatch ??= Stopwatch.StartNew();
         var inspectionStopwatch = Stopwatch.StartNew();
-        var contourJudgment = BuildContourJudgment(image);
+        var bypassTimings = new BypassInspectionTimings();
+        var contourJudgment = BuildContourJudgment(image, bypassTimings);
         var contourJudgmentText = contourJudgment.LogLine;
-        var result = CreateBypassInspectionResult(rawImagePath, contourJudgment, out var productionOutputLog);
+        var result = CreateBypassInspectionResult(rawImagePath, contourJudgment, bypassTimings, out var productionOutputLog);
+        var saveDiagnosticStopwatch = Stopwatch.StartNew();
+        result = SaveProductionNgImagesIfNeeded(image, result);
+        saveDiagnosticStopwatch.Stop();
+        var saveResultStopwatch = Stopwatch.StartNew();
         await _repository.SaveResultAsync(result);
+        saveResultStopwatch.Stop();
         inspectionStopwatch.Stop();
 
         _lastInspectionResult = result;
-        _lastRawImagePath = rawImagePath;
+        _lastRawImagePath = result.RawImagePath ?? rawImagePath;
 
         var renderStopwatch = Stopwatch.StartNew();
-        ResultImage.Source = CreatePreviewBitmapImageFromMat(image);
+        if (result.ResultImagePath is not null)
+        {
+            SetImage(ResultImage, result.ResultImagePath);
+        }
+        else
+        {
+            ResultImage.Source = CreatePreviewBitmapImageFromMat(image);
+        }
         RenderResult(result);
         renderStopwatch.Stop();
 
@@ -476,17 +494,18 @@ public partial class MainWindow
             plcStopwatch.ElapsedMilliseconds,
             totalStopwatch.ElapsedMilliseconds,
             new InspectionRunTimings(
-                VisionMs: 0,
-                SaveResultMs: inspectionStopwatch.ElapsedMilliseconds,
-                SaveDiagnosticImageMs: 0,
+                VisionMs: bypassTimings.TotalVisionMilliseconds,
+                SaveResultMs: saveResultStopwatch.ElapsedMilliseconds,
+                SaveDiagnosticImageMs: saveDiagnosticStopwatch.ElapsedMilliseconds,
                 SaveReportMs: 0,
-                VisionStageTimings.Empty),
+                bypassTimings.ToVisionStageTimings()),
             contourJudgmentText);
     }
 
     private InspectionResult CreateBypassInspectionResult(
         string? rawImagePath,
         ContourJudgmentAnalysis contourJudgment,
+        BypassInspectionTimings timings,
         out string productionOutputLog)
     {
         if (ShouldApplyBypassBackSideNg(contourJudgment, out var ngMessage))
@@ -498,39 +517,36 @@ public partial class MainWindow
                 rawImagePath);
         }
 
-        var measurement = BuildProductionMeasurementOrZero(contourJudgment, out var measurementLog, out var okMessage);
-        productionOutputLog = measurementLog;
-        return ProductionInspectionResultFactory.CreateOk(
-            _batchSession.BatchNo,
-            measurement,
-            okMessage,
-            rawImagePath);
-    }
-
-    private InspectionMeasurement BuildProductionMeasurementOrZero(
-        ContourJudgmentAnalysis contourJudgment,
-        out string productionOutputLog,
-        out string resultMessage)
-    {
-        if (TryBuildProductionMeasurement(contourJudgment, out var measurement, out var reason))
+        if (TryBuildProductionMeasurement(contourJudgment, timings, out var measurement, out var reason, out var ngReason))
         {
-            productionOutputLog = "生产正反面检测: 未发现反面NG，已输出XYR纠偏。";
-            resultMessage = ProductionInspectionResultFactory.OkMessage;
-            return measurement;
+            productionOutputLog = "生产检测: 未发现反面NG/缺料崩边NG，轮廓角度可靠，已输出XYR纠偏。";
+            return ProductionInspectionResultFactory.CreateOk(
+                _batchSession.BatchNo,
+                measurement,
+                ProductionInspectionResultFactory.OkMessage,
+                rawImagePath);
         }
 
-        productionOutputLog = $"生产正反面检测: 未发现反面NG，但XYR不可用，PLC输出OK零补偿。原因={reason}";
-        resultMessage = $"{ProductionInspectionResultFactory.ZeroCorrectionOkMessage}原因: {reason}";
-        return CreateZeroProductionMeasurement();
+        var unsafeXyrMessage = $"轮廓检测NG: {reason}，XYR已清零。";
+        productionOutputLog = $"生产检测: {unsafeXyrMessage}";
+        return ProductionInspectionResultFactory.CreateUnsafeXyrNg(
+            _batchSession.BatchNo,
+            unsafeXyrMessage,
+            rawImagePath,
+            ngReason: ngReason);
     }
 
     private bool TryBuildProductionMeasurement(
         ContourJudgmentAnalysis contourJudgment,
+        BypassInspectionTimings timings,
         out InspectionMeasurement measurement,
-        out string reason)
+        out string reason,
+        out NgReason ngReason)
     {
         measurement = CreateZeroProductionMeasurement();
         reason = string.Empty;
+        ngReason = NgReason.MatchFailed;
+        ClearPendingProductionNgDiagnosticOverlay();
 
         var template = _template;
         if (template is null)
@@ -543,6 +559,7 @@ public partial class MainWindow
         if (currentFeature is null)
         {
             reason = "当前图片外轮廓提取失败";
+            ngReason = NgReason.ShapeOutOfTolerance;
             return false;
         }
 
@@ -561,64 +578,163 @@ public partial class MainWindow
             return false;
         }
 
-        var resolvedAngleDegrees = template.ReferenceAngleDegrees;
-        var matchScore = 0.0;
-        var allowFullRotation = false;
-        if (currentFeature.Strategy.AllowsRCorrection && templateFeature.Strategy.AllowsRCorrection)
+        var shapeStopwatch = Stopwatch.StartNew();
+        var angleResult = _productionAutoAngleResolver.Resolve(
+            currentFeature,
+            templateFeature,
+            template,
+            contourJudgment.ShapeFrontBackMatch?.Front,
+            activeParameters.FourWaySymmetricEnabled);
+        shapeStopwatch.Stop();
+        timings.ShapeMatchMilliseconds += shapeStopwatch.ElapsedMilliseconds;
+        if (!angleResult.IsReliable)
         {
-            var radiusMatch = contourJudgment.FrontBackMatch is { } match &&
-                match.Decision != ContourFrontBackDecision.Unavailable
-                    ? new ContourRadiusMatchWithAlternative(
-                        Shift: 0,
-                        AngleDegrees: match.FrontAngleDegrees,
-                        ErrorPixels: match.FrontErrorPixels,
-                        ErrorNormalized: 0,
-                        AlternativeShift: 0,
-                        AlternativeAngleDegrees: 0,
-                        AlternativeErrorPixels: match.FrontAlternativeErrorPixels,
-                        AlternativeErrorNormalized: 0)
-                    : ContourFeatureExtractor.MatchRadiusSignatureWithAlternatives(
-                        currentFeature.RadiusSignature,
-                        templateFeature.RadiusSignature);
-
-            resolvedAngleDegrees = AngleMath.NormalizeDegrees360(template.ReferenceAngleDegrees + radiusMatch.AngleDegrees);
-            matchScore = BuildContourMatchScore(radiusMatch.ErrorPixels);
-            allowFullRotation = true;
+            reason = angleResult.Message;
+            ngReason = NgReason.ShapeOutOfTolerance;
+            return false;
         }
-        else
+
+        var reliability = ProductionContourReliabilityGuard.Evaluate(
+            currentFeature,
+            templateFeature,
+            template,
+            angleResult.MatchScore);
+        if (!reliability.IsReliable)
         {
-            matchScore = currentFeature.Strategy.AllowsRCorrection || templateFeature.Strategy.AllowsRCorrection
-                ? 0.0
-                : 1.0;
+            reason = reliability.Reason;
+            ngReason = NgReason.ShapeOutOfTolerance;
+            return false;
+        }
+        if (!string.IsNullOrWhiteSpace(reliability.Warning))
+        {
+            Log($"生产轮廓提示: {reliability.Warning}");
         }
 
         var currentCenter = activeParameters.CameraCalibration.PixelToMachine(
-            currentFeature.CenterXPixel,
-            currentFeature.CenterYPixel);
+            angleResult.CenterXPixel,
+            angleResult.CenterYPixel);
         var referenceCenter = new MachinePoint(
             template.ReferenceCenterXMm,
             template.ReferenceCenterYMm);
         var alignmentSnapshot = XyrAlignmentSolver.Solve(
-            new PartPose2D(currentCenter.XMm, currentCenter.YMm, resolvedAngleDegrees, matchScore),
+            new PartPose2D(currentCenter.XMm, currentCenter.YMm, angleResult.ResolvedAngleDegrees, angleResult.MatchScore),
             new PartPose2D(referenceCenter.XMm, referenceCenter.YMm, template.ReferenceAngleDegrees, template.MatchScoreBaseline),
             activeParameters.RAxisCenterCalibration,
             activeParameters.InvertRotationCompensation ? -1 : 1,
-            allowFullRotation);
+            angleResult.AllowsFullRotation);
         measurement = new InspectionMeasurement(
-            currentFeature.CenterXPixel,
-            currentFeature.CenterYPixel,
+            angleResult.CenterXPixel,
+            angleResult.CenterYPixel,
             alignmentSnapshot.XOffsetMm,
             alignmentSnapshot.YOffsetMm,
             alignmentSnapshot.HomeXActionMm,
             alignmentSnapshot.HomeYActionMm,
-            resolvedAngleDegrees,
+            angleResult.ResolvedAngleDegrees,
             alignmentSnapshot.AngleOffsetDegrees,
             alignmentSnapshot.HomeRActionDegrees,
             template.WidthMm,
             template.HeightMm,
             currentFeature.AreaPixels,
-            matchScore);
+            angleResult.MatchScore);
+        Log($"生产Shape配准: {angleResult.Message}");
+        if (angleResult.SkipMissingMaterialDetection)
+        {
+            Log("缺料精检跳过: Shape兜底时不做mask精对齐差分，只保留肉眼可见边缘缺损粗判，避免良品误NG。");
+            return true;
+        }
+
+        var defectStopwatch = Stopwatch.StartNew();
+        var defect = _productionMissingMaterialDetector.Evaluate(
+            currentFeature,
+            templateFeature,
+            template,
+            angleResult,
+            buildDiagnosticOverlay: true);
+        defectStopwatch.Stop();
+        timings.DecisionMilliseconds += defectStopwatch.ElapsedMilliseconds;
+        Log(defect.Message);
+        if (!defect.IsPass)
+        {
+            _pendingProductionNgDiagnosticOverlay?.Dispose();
+            _pendingProductionNgDiagnosticOverlay = defect.DiagnosticOverlay;
+            measurement = CreateZeroProductionMeasurement();
+            reason = defect.Message;
+            ngReason = NgReason.MissingMaterial;
+            return false;
+        }
+
         return true;
+    }
+
+    private InspectionResult SaveProductionNgImagesIfNeeded(Mat image, InspectionResult result)
+    {
+        if (result.Decision == InspectionDecision.Ok)
+        {
+            ClearPendingProductionNgDiagnosticOverlay();
+            return result;
+        }
+
+        var rawImagePath = result.RawImagePath;
+        var resultImagePath = result.ResultImagePath;
+        try
+        {
+            rawImagePath ??= _inspectionFileStore.SaveInspectionRawImage(
+                image,
+                result.BatchNo,
+                result.PartNo);
+            if (resultImagePath is null)
+            {
+                using var diagnostic = BuildProductionNgDiagnosticImage(image, result, _pendingProductionNgDiagnosticOverlay);
+                resultImagePath = _inspectionFileStore.SaveDiagnosticImage(
+                    diagnostic,
+                    result.BatchNo,
+                    result.PartNo);
+            }
+            Log($"生产NG原图已保存: {rawImagePath}");
+            Log($"生产NG诊断图已保存: {resultImagePath}");
+        }
+        catch (Exception ex)
+        {
+            Log($"生产NG图片保存失败: {ex.Message}");
+        }
+        finally
+        {
+            ClearPendingProductionNgDiagnosticOverlay();
+        }
+
+        return result with
+        {
+            RawImagePath = rawImagePath,
+            ResultImagePath = resultImagePath
+        };
+    }
+
+    private static Mat BuildProductionNgDiagnosticImage(Mat image, InspectionResult result, Mat? diagnosticOverlay = null)
+    {
+        var diagnostic = diagnosticOverlay is not null && !diagnosticOverlay.Empty()
+            ? diagnosticOverlay.Clone()
+            : image.Channels() == 1
+                ? image.CvtColor(ColorConversionCodes.GRAY2BGR)
+                : image.Clone();
+        var overlay = result.NgReason == NgReason.MissingMaterial
+            ? "NG edge missing"
+            : "NG 轮廓匹配不稳";
+        Cv2.PutText(
+            diagnostic,
+            overlay,
+            new OpenCvSharp.Point(60, 160),
+            HersheyFonts.HersheySimplex,
+            4.0,
+            Scalar.Red,
+            10,
+            LineTypes.AntiAlias);
+        return diagnostic;
+    }
+
+    private void ClearPendingProductionNgDiagnosticOverlay()
+    {
+        _pendingProductionNgDiagnosticOverlay?.Dispose();
+        _pendingProductionNgDiagnosticOverlay = null;
     }
 
     private static InspectionMeasurement CreateZeroProductionMeasurement()
@@ -639,16 +755,6 @@ public partial class MainWindow
             MatchScore: 0);
     }
 
-    private static double BuildContourMatchScore(double errorPixels)
-    {
-        if (double.IsNaN(errorPixels) || double.IsInfinity(errorPixels))
-        {
-            return 0.0;
-        }
-
-        return Math.Clamp(1.0 - errorPixels / 30.0, 0.0, 1.0);
-    }
-
     private bool ShouldApplyBypassBackSideNg(
         ContourJudgmentAnalysis contourJudgment,
         out string message)
@@ -659,28 +765,31 @@ public partial class MainWindow
             return false;
         }
 
-        var frontBackMatch = contourJudgment.FrontBackMatch;
-        if (frontBackMatch is null ||
-            frontBackMatch.Decision != ContourFrontBackDecision.Back ||
-            !frontBackMatch.IsReliable)
+        var shapeFrontBack = contourJudgment.ShapeFrontBackMatch;
+        if (shapeFrontBack is null ||
+            shapeFrontBack.Decision != ContourFrontBackDecision.Back ||
+            !shapeFrontBack.IsReliable)
         {
             return false;
         }
 
         message =
-            "反面NG: 外轮廓半径更接近镜像模板，" +
-            $"正面误差={frontBackMatch.FrontErrorPixels:F2}px，" +
-            $"镜像误差={frontBackMatch.BackErrorPixels:F2}px，" +
-            $"分离={frontBackMatch.SeparationPixels:F2}px。";
+            "反面NG: Shape匹配更接近镜像模板，" +
+            $"正面误差={shapeFrontBack.Front.ErrorPixels:F2}px，" +
+            $"镜像误差={shapeFrontBack.Back.ErrorPixels:F2}px，" +
+            $"分离={shapeFrontBack.SeparationPixels:F2}px。";
         return true;
     }
 
-    private ContourJudgmentAnalysis BuildContourJudgment(Mat image)
+    private ContourJudgmentAnalysis BuildContourJudgment(Mat image, BypassInspectionTimings timings)
     {
         try
         {
+            var featureStopwatch = Stopwatch.StartNew();
             var feature = _contourFeatureExtractor.Extract(image, ReadVisionParameters());
-            var frontBack = AnalyzeContourFrontBack(feature);
+            featureStopwatch.Stop();
+            timings.DetectPartMilliseconds += featureStopwatch.ElapsedMilliseconds;
+            var frontBack = AnalyzeContourFrontBack(feature, timings);
             var frontBackSegment = BuildContourFrontBackLogSegment(frontBack);
             var logLine =
                 "判断: " +
@@ -693,7 +802,7 @@ public partial class MainWindow
                 $"圆度={feature.Circularity:F3}，" +
                 $"半径特征={feature.RadiusSignalPixels:F2}px" +
                 $"{frontBackSegment}。";
-            return new ContourJudgmentAnalysis(logLine, feature, frontBack.Match);
+            return new ContourJudgmentAnalysis(logLine, feature, frontBack.ShapeMatch);
         }
         catch (Exception ex)
         {
@@ -701,7 +810,9 @@ public partial class MainWindow
         }
     }
 
-    private ContourFrontBackAnalysis AnalyzeContourFrontBack(ContourFeatureExtraction currentFeature)
+    private ContourFrontBackAnalysis AnalyzeContourFrontBack(
+        ContourFeatureExtraction currentFeature,
+        BypassInspectionTimings timings)
     {
         if (_bypassLogTemplateFeature is null)
         {
@@ -714,7 +825,15 @@ public partial class MainWindow
             return new ContourFrontBackAnalysis($"，正反=参考模板型号不一致，参考={_bypassLogTemplateProductName}", null);
         }
 
-        var match = _contourFrontBackMatcher.Match(currentFeature, _bypassLogTemplateFeature);
+        if (!_visionParameters.BackSideNgEnabled)
+        {
+            return new ContourFrontBackAnalysis("，正反=未启用", null);
+        }
+
+        var frontBackStopwatch = Stopwatch.StartNew();
+        var match = _productionAutoAngleResolver.MatchFrontBack(currentFeature, _bypassLogTemplateFeature);
+        frontBackStopwatch.Stop();
+        timings.FrontBackMilliseconds += frontBackStopwatch.ElapsedMilliseconds;
         if (match.Decision == ContourFrontBackDecision.Unavailable)
         {
             return new ContourFrontBackAnalysis($"，正反=不可用，原因={SimplifyFrontBackMessage(match.Message)}", match);
@@ -722,8 +841,8 @@ public partial class MainWindow
 
         return new ContourFrontBackAnalysis(
             $"，正反={FormatContourFrontBackDecision(match.Decision)}({FormatContourFrontBackModeText()})" +
-            $"，正面误差={FormatPixels(match.FrontErrorPixels)}px" +
-            $"，镜像误差={FormatPixels(match.BackErrorPixels)}px" +
+            $"，正面Shape误差={FormatPixels(match.Front.ErrorPixels)}px" +
+            $"，镜像Shape误差={FormatPixels(match.Back.ErrorPixels)}px" +
             $"，分离={FormatPixels(match.SeparationPixels)}px",
             match);
     }
@@ -777,11 +896,41 @@ public partial class MainWindow
     private sealed record ContourJudgmentAnalysis(
         string LogLine,
         ContourFeatureExtraction? Feature,
-        ContourFrontBackMatch? FrontBackMatch);
+        ContourShapeFrontBackMatch? ShapeFrontBackMatch);
 
     private sealed record ContourFrontBackAnalysis(
         string LogSegment,
-        ContourFrontBackMatch? Match);
+        ContourShapeFrontBackMatch? ShapeMatch);
+
+    private sealed class BypassInspectionTimings
+    {
+        public long DetectPartMilliseconds { get; set; }
+
+        public long ShapeMatchMilliseconds { get; set; }
+
+        public long DecisionMilliseconds { get; set; }
+
+        public long FrontBackMilliseconds { get; set; }
+
+        public long TotalVisionMilliseconds =>
+            DetectPartMilliseconds +
+            ShapeMatchMilliseconds +
+            DecisionMilliseconds +
+            FrontBackMilliseconds;
+
+        public VisionStageTimings ToVisionStageTimings()
+        {
+            return new VisionStageTimings(
+                PrepareImageMs: 0,
+                DetectPartMs: DetectPartMilliseconds,
+                ResolveAngleMs: ShapeMatchMilliseconds,
+                TemplateSimilarityMs: 0,
+                AlignmentMs: 0,
+                DecisionMs: DecisionMilliseconds,
+                FrontBackMs: FrontBackMilliseconds,
+                OverlayMs: 0);
+        }
+    }
 
     private static string FormatAutoPartShapeClass(AutoPartShapeClass shapeClass)
     {
@@ -879,9 +1028,8 @@ public partial class MainWindow
     {
         var lines = new List<string>
         {
-            $"结果: {result.Decision}  原因: {FormatNgReason(result)}",
-            $"耗时: 总{totalElapsedMilliseconds}ms  拍照{captureElapsedMilliseconds}ms  检测/存储{inspectionElapsedMilliseconds}ms  显示{renderElapsedMilliseconds}ms  PLC{plcElapsedMilliseconds}ms",
-            $"\u660e\u7ec6: \u89c6\u89c9{timings.VisionMs}ms  \u8bb0\u5f55{timings.SaveResultMs}ms  \u56fe{timings.SaveDiagnosticImageMs}ms  \u62a5\u544a{timings.SaveReportMs}ms",
+            $"结果: {FormatDecisionText(result)}  原因: {FormatNgReason(result)}",
+            $"耗时: 总{totalElapsedMilliseconds}ms 拍照{captureElapsedMilliseconds}ms 视觉{timings.VisionMs}ms PLC{plcElapsedMilliseconds}ms",
             FormatVisionStageTimingLine(timings.StageTimings),
             FormatRuntimeXyrLine(result)
         };
@@ -890,6 +1038,7 @@ public partial class MainWindow
             lines.Add(judgmentLine);
         }
 
+        UpdateRuntimeCurrentPartPanel(result, captureElapsedMilliseconds, totalElapsedMilliseconds, judgmentLine);
         AddRuntimeLogLines(lines.ToArray());
     }
 
@@ -907,6 +1056,41 @@ public partial class MainWindow
             $"叠加{timings.OverlayMs}ms";
     }
 
+    private void UpdateRuntimeTemplatePanel(PartTemplate template)
+    {
+        var shapeText = _bypassLogTemplateFeature is null
+            ? "-"
+            : FormatAutoPartShapeClass(_bypassLogTemplateFeature.Strategy.ShapeClass);
+        var backSideText = _visionParameters.BackSideNgEnabled ? "开" : "关";
+        var fourWayText = _visionParameters.FourWaySymmetricEnabled ? "开" : "关";
+        RuntimeTemplateText.Text =
+            $"型号: {FormatSummaryValue(template.ProductName)}\n" +
+            $"标准: X={FormatRuntimeNumber(template.ReferenceCenterXMm)}  " +
+            $"Y={FormatRuntimeNumber(template.ReferenceCenterYMm)}  " +
+            $"R={FormatRuntimeNumber(template.ReferenceAngleDegrees)}\n" +
+            $"形态: {shapeText}    反面NG: {backSideText}    四边对称: {fourWayText}";
+    }
+
+    private void UpdateRuntimeCurrentPartPanel(
+        InspectionResult result,
+        long captureElapsedMilliseconds,
+        long totalElapsedMilliseconds,
+        string? judgmentLine)
+    {
+        var decisionText = FormatDecisionText(result);
+        var reasonText = FormatNgReason(result);
+        var xyrText = FormatRuntimeXyrLine(result);
+        RuntimeCurrentPartText.Text =
+            $"结果: {decisionText}    原因: {reasonText}\n" +
+            $"{xyrText}\n" +
+            $"耗时: 总{totalElapsedMilliseconds}ms  拍照{captureElapsedMilliseconds}ms";
+        RuntimeCurrentPartText.Foreground = result.Decision == InspectionDecision.Ok
+            ? Brushes.ForestGreen
+            : result.Decision is InspectionDecision.Ng or InspectionDecision.Error
+                ? Brushes.Red
+                : Brushes.Black;
+    }
+
     private static string FormatNgReason(InspectionResult result)
     {
         if (result.Decision == InspectionDecision.Ok)
@@ -916,22 +1100,27 @@ public partial class MainWindow
 
         return result.NgReason switch
         {
-            NgReason.MatchFailed => "未找到工件",
+            NgReason.MatchFailed => "定位失败",
             NgReason.SizeOutOfTolerance => "尺寸超差",
-            NgReason.ShapeOutOfTolerance => "形状不符",
+            NgReason.ShapeOutOfTolerance => "轮廓匹配不稳",
             NgReason.HoleOutOfTolerance => "孔位超差",
             NgReason.CameraError => "相机异常",
             NgReason.PlcError => "PLC异常",
             NgReason.AlgorithmError => "算法异常",
             NgReason.BackSideDetected => "反面",
             NgReason.FrontBumpMissing => "正面特征缺失",
+            NgReason.MissingMaterial => "边缘缺损/缺料",
             _ => result.NgReason.ToString()
         };
     }
 
-    private static bool ShouldShowOnRuntimePanel(string line)
+    private static string FormatDecisionText(InspectionResult result)
     {
-        return IsRuntimeNgLine(line) || IsRuntimeXyrLine(line) || IsRuntimeJudgmentLine(line);
+        return result.Decision == InspectionDecision.Ok
+            ? "OK"
+            : result.Decision == InspectionDecision.Ng
+                ? "NG"
+                : result.Decision.ToString();
     }
 
     private static string FormatRuntimeXyrLine(InspectionResult result)
@@ -939,17 +1128,14 @@ public partial class MainWindow
         var measurement = result.Measurement;
         if (measurement is null)
         {
-            return "XYR: 无有效测量值";
+            return "XYR: -";
         }
 
         return
             "XYR: " +
-            $"偏差 X={FormatRuntimeNumber(measurement.XOffsetMm)}mm " +
-            $"Y={FormatRuntimeNumber(measurement.YOffsetMm)}mm " +
-            $"R={FormatRuntimeNumber(measurement.AngleOffsetDegrees)}deg  " +
-            $"补偿 X={FormatRuntimeNumber(measurement.XCompensationMm)}mm " +
-            $"Y={FormatRuntimeNumber(measurement.YCompensationMm)}mm " +
-            $"R={FormatRuntimeNumber(measurement.RotationCompensationDegrees)}deg";
+            $"X={FormatRuntimeNumber(measurement.XCompensationMm)}  " +
+            $"Y={FormatRuntimeNumber(measurement.YCompensationMm)}  " +
+            $"R={FormatRuntimeNumber(measurement.RotationCompensationDegrees)}";
     }
 
     private static string FormatRuntimeNumber(double value)
@@ -962,74 +1148,10 @@ public partial class MainWindow
 
     private void AddRuntimeLogLines(params string[] lines)
     {
-        for (var index = lines.Length - 1; index >= 0; index--)
+        foreach (var line in lines)
         {
-            var line = lines[index];
             _fileLogger.Write(line);
-            if (ShouldShowOnRuntimePanel(line))
-            {
-                LogList.Items.Insert(0, CreateRuntimeLogLine(line));
-            }
         }
-
-        while (LogList.Items.Count > 80)
-        {
-            LogList.Items.RemoveAt(LogList.Items.Count - 1);
-        }
-    }
-
-    private static RuntimeLogLine CreateRuntimeLogLine(string line)
-    {
-        var displayText = $"{DateTime.Now:HH:mm:ss} {FormatRuntimePanelLine(line)}";
-        if (IsRuntimeNgLine(line))
-        {
-            return new RuntimeLogLine(displayText, Brushes.Red, FontWeights.Bold);
-        }
-
-        if (IsRuntimeOkLine(line))
-        {
-            return new RuntimeLogLine(displayText, Brushes.ForestGreen, FontWeights.Bold);
-        }
-
-        return new RuntimeLogLine(displayText, Brushes.Black, FontWeights.Normal);
-    }
-
-    private static string FormatRuntimePanelLine(string line)
-    {
-        if (!line.StartsWith("结果:", StringComparison.Ordinal))
-        {
-            return line;
-        }
-
-        var reasonIndex = line.IndexOf("原因:", StringComparison.Ordinal);
-        var reason = reasonIndex >= 0
-            ? line[(reasonIndex + "原因:".Length)..].Trim()
-            : line;
-
-        return $"NG  NG原因: {reason}";
-    }
-
-    private static bool IsRuntimeOkLine(string line)
-    {
-        return line.StartsWith("结果:", StringComparison.Ordinal)
-            && line.IndexOf("OK", StringComparison.OrdinalIgnoreCase) >= 0;
-    }
-
-    private static bool IsRuntimeNgLine(string line)
-    {
-        return line.StartsWith("结果:", StringComparison.Ordinal)
-            && (line.IndexOf("NG", StringComparison.OrdinalIgnoreCase) >= 0
-                || line.IndexOf("ERROR", StringComparison.OrdinalIgnoreCase) >= 0);
-    }
-
-    private static bool IsRuntimeXyrLine(string line)
-    {
-        return line.StartsWith("XYR:", StringComparison.Ordinal);
-    }
-
-    private static bool IsRuntimeJudgmentLine(string line)
-    {
-        return line.StartsWith("判断:", StringComparison.Ordinal);
     }
 
     private PlcOutputCommand CalculatePlcOutputCommand(InspectionMeasurement measurement)
@@ -1041,6 +1163,4 @@ public partial class MainWindow
     {
         _fileLogger.Write(message);
     }
-
-    private sealed record RuntimeLogLine(string DisplayText, Brush Foreground, FontWeight FontWeight);
 }
