@@ -242,7 +242,7 @@ public sealed class OpenCvVisionService
 			{
 				DrawCandidateContours(diagnostic, candidateDetections, detection);
 				Point[] contourForDraw = OffsetContour(detection.Contour, detection.Offset);
-				Cv2.DrawContours(diagnostic, new Point[1][] { contourForDraw }, -1, Scalar.LimeGreen, 2);
+				DrawOutlinedContour(diagnostic, contourForDraw, Scalar.LimeGreen, 5);
 				DrawCenterMarkers(diagnostic, detection, template);
 			}
 			MachinePoint referenceCenter = GetReferenceCenterMachine(template, activeParameters);
@@ -2237,7 +2237,7 @@ public sealed class OpenCvVisionService
 			{
 				Point[] contour = OffsetContour(candidate.Contour, candidate.Offset);
 				Scalar color = new Scalar(0.0, 180.0, 255.0);
-				Cv2.DrawContours(diagnostic, new Point[1][] { contour }, -1, color);
+				DrawOutlinedContour(diagnostic, contour, color, 3);
 				Cv2.PutText(diagnostic, $"C{index + 1}", new Point((int)Math.Round(candidate.CenterXPixel) + 8, (int)Math.Round(candidate.CenterYPixel) - 8), HersheyFonts.HersheySimplex, 0.55, color);
 			}
 		}
@@ -2245,8 +2245,20 @@ public sealed class OpenCvVisionService
 
 	private static void DrawCenterMarkers(Mat diagnostic, PartDetection detection, PartTemplate template)
 	{
-		Cv2.DrawMarker(diagnostic, new Point((int)Math.Round(template.ReferenceCenterXPixel), (int)Math.Round(template.ReferenceCenterYPixel)), new Scalar(255.0, 191.0, 0.0), MarkerTypes.Cross, 22, 2);
-		Cv2.DrawMarker(diagnostic, new Point((int)Math.Round(detection.CenterXPixel), (int)Math.Round(detection.CenterYPixel)), Scalar.Yellow, MarkerTypes.TiltedCross, 22, 2);
+		DrawOutlinedMarker(diagnostic, new Point((int)Math.Round(template.ReferenceCenterXPixel), (int)Math.Round(template.ReferenceCenterYPixel)), new Scalar(255.0, 191.0, 0.0), MarkerTypes.Cross, 36, 4);
+		DrawOutlinedMarker(diagnostic, new Point((int)Math.Round(detection.CenterXPixel), (int)Math.Round(detection.CenterYPixel)), Scalar.Yellow, MarkerTypes.TiltedCross, 36, 4);
+	}
+
+	private static void DrawOutlinedContour(Mat image, Point[] contour, Scalar color, int thickness)
+	{
+		Cv2.DrawContours(image, new Point[1][] { contour }, -1, Scalar.Black, thickness + 4, LineTypes.AntiAlias);
+		Cv2.DrawContours(image, new Point[1][] { contour }, -1, color, thickness, LineTypes.AntiAlias);
+	}
+
+	private static void DrawOutlinedMarker(Mat image, Point center, Scalar color, MarkerTypes markerType, int markerSize, int thickness)
+	{
+		Cv2.DrawMarker(image, center, Scalar.Black, markerType, markerSize, thickness + 4, LineTypes.AntiAlias);
+		Cv2.DrawMarker(image, center, color, markerType, markerSize, thickness, LineTypes.AntiAlias);
 	}
 
 	private static void DrawOverlay(Mat diagnostic, InspectionDecision decision, string message, InspectionMeasurement measurement, AngleResolutionDiagnostic angleDiagnostic, TemplateSimilarityResult? similarity)

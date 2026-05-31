@@ -8,6 +8,8 @@ public interface ICameraService : IAsyncDisposable
 
     Task OpenAsync(string serialNumberOrIndex, CancellationToken cancellationToken = default);
 
+    CameraSettingsApplyResult ApplySettings(CameraAcquisitionSettings settings);
+
     Task<CameraFrame> CaptureAsync(int timeoutMilliseconds, CancellationToken cancellationToken = default);
 
     Task CloseAsync(CancellationToken cancellationToken = default);

@@ -131,10 +131,32 @@ public partial class MainWindow
             return;
         }
 
-        var warnings = await Task.Run(() => _cameraService.ApplySettings(_cameraSettings));
-        foreach (var warning in warnings)
+        var result = await Task.Run(() => _cameraService.ApplySettings(_cameraSettings));
+        Log(
+            "相机参数读回: " +
+            $"请求曝光{_cameraSettings.ExposureTimeMicroseconds:F1}us, " +
+            $"实际曝光{FormatNullableDouble(result.RuntimeSettings.ExposureTimeMicroseconds, "us")}, " +
+            $"自动曝光{result.RuntimeSettings.ExposureAuto ?? "未知"}, " +
+            $"请求目标亮度{_cameraSettings.AutoExposureTarget}, " +
+            $"读回目标亮度{FormatNullableInt(result.RuntimeSettings.AutoExposureTarget ?? result.RuntimeSettings.AutoTargetValue ?? result.RuntimeSettings.Brightness)}, " +
+            $"实际增益{FormatNullableDouble(result.RuntimeSettings.Gain, string.Empty)}");
+        foreach (var warning in result.Warnings)
         {
             Log(warning);
         }
+    }
+
+    private static string FormatNullableDouble(double? value, string suffix)
+    {
+        return value.HasValue
+            ? $"{value.Value:F1}{suffix}"
+            : "未知";
+    }
+
+    private static string FormatNullableInt(int? value)
+    {
+        return value.HasValue
+            ? value.Value.ToString(CultureInfo.InvariantCulture)
+            : "未知";
     }
 }

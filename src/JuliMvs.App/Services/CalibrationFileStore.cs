@@ -102,6 +102,7 @@ internal sealed class CalibrationFileStore
             frame.Width,
             frame.Height,
             frame.PixelFormat,
+            frame.ActualExposureTimeMicroseconds,
             context.Camera,
             context.BatchNo,
             context.ProductName,

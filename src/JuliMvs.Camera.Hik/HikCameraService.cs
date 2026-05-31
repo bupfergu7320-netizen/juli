@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Runtime.InteropServices;
 using System.Text;
 using JuliMvs.Core.Camera;
@@ -79,16 +80,20 @@ public sealed class HikCameraService : ICameraService
         return Task.CompletedTask;
     }
 
-    public IReadOnlyList<string> ApplySettings(CameraAcquisitionSettings settings)
+    public CameraSettingsApplyResult ApplySettings(CameraAcquisitionSettings settings)
     {
         if (_camera is null)
         {
             throw new InvalidOperationException("相机未打开。");
         }
 
-        var warnings = new List<string>(_configurationWarnings);
-        warnings.AddRange(ApplySettings(_camera, settings));
-        return warnings;
+        lock (_syncRoot)
+        {
+            var warnings = new List<string>(_configurationWarnings);
+            warnings.AddRange(ApplySettings(_camera, settings));
+            var runtimeSettings = ReadRuntimeSettings(_camera);
+            return new CameraSettingsApplyResult(runtimeSettings, warnings);
+        }
     }
 
     private static bool IsDeviceAccessible(ref MyCamera.MV_CC_DEVICE_INFO deviceInfo)
@@ -135,6 +140,7 @@ public sealed class HikCameraService : ICameraService
                     checked((int)frame.stFrameInfo.nHeight),
                     frame.stFrameInfo.nFrameNum,
                     frame.stFrameInfo.enPixelType.ToString(),
+                    frame.stFrameInfo.fExposureTime,
                     buffer,
                     DateTimeOffset.Now));
             }
@@ -288,6 +294,58 @@ public sealed class HikCameraService : ICameraService
         }
 
         return camera.MV_CC_SetBrightness_NET((uint)clamped) == MyCamera.MV_OK;
+    }
+
+    private static CameraRuntimeSettings ReadRuntimeSettings(MyCamera camera)
+    {
+        return new CameraRuntimeSettings(
+            TryGetFloatValue(camera, "ExposureTime"),
+            TryGetFloatValue(camera, "Gain"),
+            TryGetEnumSymbolic(camera, "ExposureAuto"),
+            TryGetIntValue(camera, "AutoExposureTarget"),
+            TryGetIntValue(camera, "AutoTargetValue"),
+            TryGetBrightness(camera));
+    }
+
+    private static double? TryGetFloatValue(MyCamera camera, string key)
+    {
+        var value = new MyCamera.MVCC_FLOATVALUE();
+        return camera.MV_CC_GetFloatValue_NET(key, ref value) == MyCamera.MV_OK
+            ? value.fCurValue
+            : null;
+    }
+
+    private static int? TryGetIntValue(MyCamera camera, string key)
+    {
+        var value = new MyCamera.MVCC_INTVALUE_EX();
+        return camera.MV_CC_GetIntValueEx_NET(key, ref value) == MyCamera.MV_OK
+            ? checked((int)value.nCurValue)
+            : null;
+    }
+
+    private static int? TryGetBrightness(MyCamera camera)
+    {
+        var value = new MyCamera.MVCC_INTVALUE();
+        return camera.MV_CC_GetBrightness_NET(ref value) == MyCamera.MV_OK
+            ? checked((int)value.nCurValue)
+            : null;
+    }
+
+    private static string? TryGetEnumSymbolic(MyCamera camera, string key)
+    {
+        var value = new MyCamera.MVCC_ENUMVALUE();
+        if (camera.MV_CC_GetEnumValue_NET(key, ref value) != MyCamera.MV_OK)
+        {
+            return null;
+        }
+
+        var entry = new MyCamera.MVCC_ENUMENTRY { nValue = value.nCurValue };
+        if (camera.MV_CC_GetEnumEntrySymbolic_NET(key, ref entry) != MyCamera.MV_OK)
+        {
+            return value.nCurValue.ToString(CultureInfo.InvariantCulture);
+        }
+
+        return Clean(Convert.ToString(entry.chSymbolic));
     }
 
     private CameraDeviceInfo ResolveDevice(IReadOnlyList<CameraDeviceInfo> devices, string serialNumberOrIndex)

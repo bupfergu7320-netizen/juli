@@ -51,8 +51,8 @@ public partial class MainWindow
     {
         var preview = image.Channels() == 1 ? image.CvtColor(ColorConversionCodes.GRAY2BGR) : image.Clone();
         var center = new OpenCvSharp.Point((int)Math.Round(detection.CenterXPixel), (int)Math.Round(detection.CenterYPixel));
-        Cv2.DrawMarker(preview, center, Scalar.Yellow, MarkerTypes.Cross, 42, 3);
-        Cv2.Circle(preview, center, 16, Scalar.LimeGreen, 3);
+        DrawOutlinedMarker(preview, center, Scalar.Yellow, MarkerTypes.Cross, 48, 4);
+        DrawOutlinedCircle(preview, center, 18, Scalar.LimeGreen, 4);
         Cv2.PutText(
             preview,
             pointName,
@@ -82,8 +82,8 @@ public partial class MainWindow
             ? image.Channels() == 1 ? image.CvtColor(ColorConversionCodes.GRAY2BGR) : image.Clone()
             : result.DiagnosticImage.Clone();
         var center = new OpenCvSharp.Point((int)Math.Round(centerPoint.X), (int)Math.Round(centerPoint.Y));
-        Cv2.Circle(preview, center, 24, Scalar.Red, 4);
-        Cv2.DrawMarker(preview, center, Scalar.Red, MarkerTypes.Cross, 58, 4);
+        DrawOutlinedCircle(preview, center, 26, Scalar.Red, 5);
+        DrawOutlinedMarker(preview, center, Scalar.Red, MarkerTypes.Cross, 64, 5);
         Cv2.PutText(
             preview,
             $"{pointName} center dot",
@@ -115,9 +115,9 @@ public partial class MainWindow
     {
         var preview = image.Channels() == 1 ? image.CvtColor(ColorConversionCodes.GRAY2BGR) : image.Clone();
         var center = new OpenCvSharp.Point((int)Math.Round(detection.CenterXPixel), (int)Math.Round(detection.CenterYPixel));
-        Cv2.DrawContours(preview, [detection.Contour], -1, Scalar.LimeGreen, 3);
-        Cv2.DrawMarker(preview, center, Scalar.Yellow, MarkerTypes.Cross, 44, 3);
-        Cv2.Circle(preview, center, 16, Scalar.Yellow, 3);
+        DrawOutlinedContour(preview, detection.Contour, Scalar.LimeGreen, 5);
+        DrawOutlinedMarker(preview, center, Scalar.Yellow, MarkerTypes.Cross, 52, 5);
+        DrawOutlinedCircle(preview, center, 20, Scalar.Yellow, 5);
         Cv2.PutText(
             preview,
             $"X={detection.CenterXPixel:F1} Y={detection.CenterYPixel:F1} R={detection.AngleDegrees:F2}",
@@ -127,6 +127,30 @@ public partial class MainWindow
             Scalar.White,
             2);
         return preview;
+    }
+
+    private static void DrawOutlinedContour(Mat image, OpenCvSharp.Point[] contour, Scalar color, int thickness)
+    {
+        Cv2.DrawContours(image, [contour], -1, Scalar.Black, thickness + 4, LineTypes.AntiAlias);
+        Cv2.DrawContours(image, [contour], -1, color, thickness, LineTypes.AntiAlias);
+    }
+
+    private static void DrawOutlinedMarker(
+        Mat image,
+        OpenCvSharp.Point center,
+        Scalar color,
+        MarkerTypes markerType,
+        int markerSize,
+        int thickness)
+    {
+        Cv2.DrawMarker(image, center, Scalar.Black, markerType, markerSize, thickness + 4, LineTypes.AntiAlias);
+        Cv2.DrawMarker(image, center, color, markerType, markerSize, thickness, LineTypes.AntiAlias);
+    }
+
+    private static void DrawOutlinedCircle(Mat image, OpenCvSharp.Point center, int radius, Scalar color, int thickness)
+    {
+        Cv2.Circle(image, center, radius, Scalar.Black, thickness + 4, LineTypes.AntiAlias);
+        Cv2.Circle(image, center, radius, color, thickness, LineTypes.AntiAlias);
     }
 
 }
