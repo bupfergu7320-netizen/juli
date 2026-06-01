@@ -15,6 +15,7 @@ internal static class ContourFeatureExtractorCandidateTests
         VerifyReferenceFeatureSelectsPartOverLargerInteriorFixture();
         VerifyDetachedSmallCylinderDoesNotMovePartCenter();
         VerifyConnectedFixtureArtifactIsTrimmedFromPartContour();
+        VerifyProductionReferenceRejectsLargerCurrentFixture();
     }
 
     private static void VerifyFixtureTouchingBorderDoesNotBecomePartContour()
@@ -132,6 +133,35 @@ internal static class ContourFeatureExtractorCandidateTests
         AssertLessThan(pollutedFeature.RadiusSignalPixels, 5.0, "connected artifact radius signal");
     }
 
+    private static void VerifyProductionReferenceRejectsLargerCurrentFixture()
+    {
+        using var template = new Mat(new Size(520, 520), MatType.CV_8UC1, Scalar.Black);
+        Cv2.Circle(template, new Point(420, 260), 65, Scalar.White, thickness: -1);
+
+        using var current = new Mat(new Size(520, 520), MatType.CV_8UC1, Scalar.Black);
+        Cv2.Ellipse(
+            current,
+            new Point(210, 260),
+            new Size(135, 120),
+            angle: 0,
+            startAngle: 0,
+            endAngle: 360,
+            Scalar.White,
+            thickness: -1);
+        Cv2.Circle(current, new Point(420, 260), 65, Scalar.White, thickness: -1);
+
+        var parameters = TestParameters();
+        var extractor = new ContourFeatureExtractor();
+        var referenceFeature = extractor.Extract(template, parameters);
+        var unreferencedFeature = extractor.Extract(current, parameters);
+        var referencedFeature = extractor.Extract(current, parameters, referenceFeature: referenceFeature);
+
+        AssertNear(420.0, referencedFeature.CenterXPixel, 6.0, "production reference center x");
+        AssertNear(260.0, referencedFeature.CenterYPixel, 6.0, "production reference center y");
+        AssertLessThan(referencedFeature.AreaPixels, 16_000.0, "production reference area");
+        AssertGreaterThan(Math.Abs(unreferencedFeature.CenterXPixel - referencedFeature.CenterXPixel), 120.0, "production reference changed candidate");
+    }
+
     private static ContourFeatureExtraction Extract(Mat image)
     {
         return new ContourFeatureExtractor().Extract(image, TestParameters());
@@ -162,6 +192,15 @@ internal static class ContourFeatureExtractorCandidateTests
         {
             throw new InvalidOperationException(
                 $"{name}: expected < {maximum:0.###}, actual {actual:0.###}.");
+        }
+    }
+
+    private static void AssertGreaterThan(double actual, double minimum, string name)
+    {
+        if (actual <= minimum)
+        {
+            throw new InvalidOperationException(
+                $"{name}: expected > {minimum:0.###}, actual {actual:0.###}.");
         }
     }
 }
