@@ -10,7 +10,8 @@ public sealed class ContourFeatureExtractor
     public ContourFeatureExtraction Extract(
         Mat image,
         VisionParameters? parameters = null,
-        int radiusSampleCount = DefaultRadiusSampleCount)
+        int radiusSampleCount = DefaultRadiusSampleCount,
+        ContourFeatureExtraction? referenceFeature = null)
     {
         ArgumentNullException.ThrowIfNull(image);
         if (image.Empty())
@@ -25,7 +26,9 @@ public sealed class ContourFeatureExtractor
         using var roiImage = ApplyRoi(gray, parameters.Roi, out var offset);
         using var blurred = Blur(roiImage, parameters.BlurKernelSize);
         using var binary = Threshold(blurred, parameters.BinaryThreshold);
-        var contour = FindLargestContour(binary, parameters);
+        using var inverted = new Mat();
+        Cv2.BitwiseNot(binary, inverted);
+        var contour = FindBestContour(binary, inverted, offset, parameters, referenceFeature);
         var moments = Cv2.Moments(contour);
         if (Math.Abs(moments.M00) < 0.0001)
         {
@@ -317,6 +320,173 @@ public sealed class ContourFeatureExtractor
         Cv2.MorphologyEx(binary, binary, MorphTypes.Open, smallKernel);
         Cv2.MorphologyEx(binary, binary, MorphTypes.Close, smallKernel);
         return binary;
+    }
+
+    private static Point[] FindBestContour(
+        Mat binary,
+        Mat inverted,
+        Point offset,
+        VisionParameters parameters,
+        ContourFeatureExtraction? referenceFeature)
+    {
+        var candidates = FindContourCandidates(binary, offset, parameters)
+            .Concat(FindContourCandidates(inverted, offset, parameters))
+            .ToArray();
+        if (candidates.Length == 0)
+        {
+            throw new InvalidOperationException("No valid part contour candidate was found.");
+        }
+
+        var selected = referenceFeature is null
+            ? SelectUnreferencedContourCandidate(candidates, binary.Size(), offset)
+            : SelectReferencedContourCandidate(candidates, referenceFeature);
+        return selected.Contour;
+    }
+
+    private static IEnumerable<ContourCandidate> FindContourCandidates(
+        Mat binary,
+        Point offset,
+        VisionParameters parameters)
+    {
+        Cv2.FindContours(
+            binary,
+            out Point[][] contours,
+            out _,
+            RetrievalModes.External,
+            ContourApproximationModes.ApproxSimple);
+        var minArea = Math.Max(parameters.MinPartAreaPixels, 1.0);
+        var maxArea = parameters.MaxPartAreaPixels;
+        var imageArea = Math.Max(binary.Width * binary.Height, 1);
+        foreach (var contour in contours)
+        {
+            var area = Math.Abs(Cv2.ContourArea(contour));
+            if (area < minArea || area > maxArea || area > imageArea * 0.95)
+            {
+                continue;
+            }
+
+            var shape = Cv2.MinAreaRect(contour);
+            var width = Math.Max(shape.Size.Width, shape.Size.Height);
+            var height = Math.Max(Math.Min(shape.Size.Width, shape.Size.Height), 0.0001);
+            if (width <= 2.0 || height <= 2.0)
+            {
+                continue;
+            }
+
+            var bounds = Cv2.BoundingRect(contour);
+            var fillRatio = Math.Clamp(area / Math.Max(width * height, 0.0001), 0.0, 1.5);
+            var touchesBorder =
+                bounds.X <= 1 ||
+                bounds.Y <= 1 ||
+                bounds.Right >= binary.Width - 1 ||
+                bounds.Bottom >= binary.Height - 1;
+            yield return new ContourCandidate(
+                contour,
+                area,
+                shape.Center.X + offset.X,
+                shape.Center.Y + offset.Y,
+                width,
+                height,
+                fillRatio,
+                touchesBorder);
+        }
+    }
+
+    private static ContourCandidate SelectUnreferencedContourCandidate(
+        IReadOnlyList<ContourCandidate> candidates,
+        Size imageSize,
+        Point offset)
+    {
+        var imageArea = Math.Max(imageSize.Width * imageSize.Height, 1.0);
+        var halfWidth = imageSize.Width / 2.0;
+        var halfHeight = imageSize.Height / 2.0;
+        var imageCenterX = offset.X + halfWidth;
+        var imageCenterY = offset.Y + halfHeight;
+        var maxCenterDistance = Math.Max(
+            Math.Sqrt(halfWidth * halfWidth + halfHeight * halfHeight),
+            1.0);
+        return candidates
+            .OrderByDescending(candidate =>
+                ScoreUnreferencedContourCandidate(
+                    candidate,
+                    imageArea,
+                    imageCenterX,
+                    imageCenterY,
+                    maxCenterDistance))
+            .ThenByDescending(candidate => candidate.Area)
+            .First();
+    }
+
+    private static double ScoreUnreferencedContourCandidate(
+        ContourCandidate candidate,
+        double imageArea,
+        double imageCenterX,
+        double imageCenterY,
+        double maxCenterDistance)
+    {
+        var areaFraction = candidate.Area / imageArea;
+        var distanceToCenter = Distance(candidate.CenterX, candidate.CenterY, imageCenterX, imageCenterY);
+        var centerScore = 1.0 - Math.Clamp(distanceToCenter / maxCenterDistance, 0.0, 1.0);
+        var areaScore = Math.Log10(Math.Max(candidate.Area, 1.0));
+        var borderPenalty = candidate.TouchesBorder ? 4.0 : 0.0;
+        var oversizedPenalty = areaFraction > 0.60 ? (areaFraction - 0.60) * 6.0 : 0.0;
+        var tinyPenalty = areaFraction < 0.003 ? (0.003 - areaFraction) * 200.0 : 0.0;
+        var fillPenalty = candidate.FillRatio is < 0.20 or > 0.95 ? 0.75 : 0.0;
+        return areaScore + centerScore * 1.25 - borderPenalty - oversizedPenalty - tinyPenalty - fillPenalty;
+    }
+
+    private static ContourCandidate SelectReferencedContourCandidate(
+        IReadOnlyList<ContourCandidate> candidates,
+        ContourFeatureExtraction referenceFeature)
+    {
+        var referenceFillRatio = referenceFeature.AreaPixels /
+            Math.Max(referenceFeature.WidthPixels * referenceFeature.HeightPixels, 0.0001);
+        var referenceSize = Math.Max(
+            Math.Max(referenceFeature.WidthPixels, referenceFeature.HeightPixels),
+            1.0);
+        return candidates
+            .OrderBy(candidate => ScoreReferencedContourCandidate(candidate, referenceFeature, referenceFillRatio, referenceSize))
+            .ThenByDescending(candidate => candidate.Area)
+            .First();
+    }
+
+    private static double ScoreReferencedContourCandidate(
+        ContourCandidate candidate,
+        ContourFeatureExtraction referenceFeature,
+        double referenceFillRatio,
+        double referenceSize)
+    {
+        var areaDifference = CalculateRatioDifference(candidate.Area, referenceFeature.AreaPixels);
+        var widthDifference = CalculateRatioDifference(candidate.Width, referenceFeature.WidthPixels);
+        var heightDifference = CalculateRatioDifference(candidate.Height, referenceFeature.HeightPixels);
+        var fillDifference = CalculateRatioDifference(candidate.FillRatio, referenceFillRatio);
+        var centerDistance = Distance(
+            candidate.CenterX,
+            candidate.CenterY,
+            referenceFeature.CenterXPixel,
+            referenceFeature.CenterYPixel);
+        var centerDifference = Math.Min(centerDistance / referenceSize, 2.0);
+        var borderPenalty = candidate.TouchesBorder ? 2.0 : 0.0;
+        return
+            areaDifference * 0.36 +
+            widthDifference * 0.24 +
+            heightDifference * 0.24 +
+            fillDifference * 0.10 +
+            centerDifference * 0.06 +
+            borderPenalty;
+    }
+
+    private static double CalculateRatioDifference(double current, double reference)
+    {
+        var denominator = Math.Max(Math.Abs(reference), 0.0001);
+        return Math.Abs(current - reference) / denominator;
+    }
+
+    private static double Distance(double leftX, double leftY, double rightX, double rightY)
+    {
+        var dx = leftX - rightX;
+        var dy = leftY - rightY;
+        return Math.Sqrt(dx * dx + dy * dy);
     }
 
     private static Point[] FindLargestContour(Mat binary, VisionParameters parameters)
@@ -722,6 +892,16 @@ public sealed class ContourFeatureExtractor
         var raw = PositiveModulo(left - right, modulo);
         return raw > modulo / 2 ? raw - modulo : raw;
     }
+
+    private sealed record ContourCandidate(
+        Point[] Contour,
+        double Area,
+        double CenterX,
+        double CenterY,
+        double Width,
+        double Height,
+        double FillRatio,
+        bool TouchesBorder);
 }
 
 public sealed record ContourFeatureExtraction(
