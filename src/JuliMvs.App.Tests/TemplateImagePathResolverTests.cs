@@ -52,6 +52,16 @@ if (args.Length > 2 &&
     return;
 }
 
+if (args.Length > 1 &&
+    string.Equals(args[0], "field-contour", StringComparison.OrdinalIgnoreCase))
+{
+    var outputDirectory = args.Length > 2
+        ? args[2]
+        : Path.Combine(@"D:\JuliMvsCalibrationPlcChangeover", "DATA", "ContourDiagnostics", DateTime.Now.ToString("yyyyMMdd-HHmmss"));
+    FieldContourOverlay.Run(args[1], outputDirectory);
+    return;
+}
+
 if (args.Length > 0 &&
     string.Equals(args[0], "synthetic-four-way-ellipse", StringComparison.OrdinalIgnoreCase))
 {

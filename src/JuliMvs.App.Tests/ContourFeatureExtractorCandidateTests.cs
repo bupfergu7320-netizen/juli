@@ -14,6 +14,7 @@ internal static class ContourFeatureExtractorCandidateTests
         VerifyDarkPartOnBrightBackgroundUsesPartContour();
         VerifyReferenceFeatureSelectsPartOverLargerInteriorFixture();
         VerifyDetachedSmallCylinderDoesNotMovePartCenter();
+        VerifyConnectedFixtureArtifactIsTrimmedFromPartContour();
     }
 
     private static void VerifyFixtureTouchingBorderDoesNotBecomePartContour()
@@ -112,6 +113,23 @@ internal static class ContourFeatureExtractorCandidateTests
         AssertNear(210.0, feature.CenterXPixel, 6.0, "small cylinder center x");
         AssertNear(210.0, feature.CenterYPixel, 6.0, "small cylinder center y");
         AssertLessThan(feature.AreaPixels, 17_000.0, "small cylinder area");
+    }
+
+    private static void VerifyConnectedFixtureArtifactIsTrimmedFromPartContour()
+    {
+        using var clean = new Mat(new Size(520, 520), MatType.CV_8UC1, Scalar.Black);
+        Cv2.Circle(clean, new Point(260, 260), 125, Scalar.White, thickness: -1);
+        using var polluted = clean.Clone();
+        Cv2.Rectangle(polluted, new Rect(360, 338, 95, 18), Scalar.White, thickness: -1);
+        Cv2.Circle(polluted, new Point(446, 347), 22, Scalar.White, thickness: -1);
+
+        var cleanFeature = Extract(clean);
+        var pollutedFeature = Extract(polluted);
+
+        AssertNear(cleanFeature.CenterXPixel, pollutedFeature.CenterXPixel, 3.5, "connected artifact center x");
+        AssertNear(cleanFeature.CenterYPixel, pollutedFeature.CenterYPixel, 3.5, "connected artifact center y");
+        AssertNear(cleanFeature.AreaPixels, pollutedFeature.AreaPixels, cleanFeature.AreaPixels * 0.035, "connected artifact area");
+        AssertLessThan(pollutedFeature.RadiusSignalPixels, 5.0, "connected artifact radius signal");
     }
 
     private static ContourFeatureExtraction Extract(Mat image)

@@ -6,6 +6,7 @@ namespace JuliMvs.Vision;
 public sealed class ContourFeatureExtractor
 {
     public const int DefaultRadiusSampleCount = 720;
+    private const int ArtifactRemovalRadiusSampleCount = 720;
 
     public ContourFeatureExtraction Extract(
         Mat image,
@@ -340,7 +341,337 @@ public sealed class ContourFeatureExtractor
         var selected = referenceFeature is null
             ? SelectUnreferencedContourCandidate(candidates, binary.Size(), offset)
             : SelectReferencedContourCandidate(candidates, referenceFeature);
-        return selected.Contour;
+        return RemoveConnectedContourArtifacts(selected.Contour, binary.Size());
+    }
+
+    private static Point[] RemoveConnectedContourArtifacts(Point[] contour, Size imageSize)
+    {
+        if (contour.Length < 3)
+        {
+            return contour;
+        }
+
+        var original = CalculateContourMetrics(contour);
+        var minimumDimension = Math.Min(original.Width, original.Height);
+        if (minimumDimension < 80.0)
+        {
+            return contour;
+        }
+
+        var kernelSizes = BuildArtifactRemovalKernelSizes(minimumDimension).ToArray();
+        if (kernelSizes.Length == 0)
+        {
+            return contour;
+        }
+
+        var maximumKernelSize = kernelSizes.Max();
+        var padding = Math.Max(maximumKernelSize * 2, 12);
+        var bounds = Cv2.BoundingRect(contour);
+        var roi = ExpandRect(bounds, padding, imageSize);
+        if (roi.Width <= maximumKernelSize * 2 || roi.Height <= maximumKernelSize * 2)
+        {
+            return contour;
+        }
+
+        var localContour = contour
+            .Select(point => new Point(point.X - roi.X, point.Y - roi.Y))
+            .ToArray();
+        using var sourceMask = new Mat(roi.Height, roi.Width, MatType.CV_8UC1, Scalar.Black);
+        Cv2.FillPoly(sourceMask, new[] { localContour }, Scalar.White);
+
+        Point[] bestContour = contour;
+        var bestScore = 0.0;
+        foreach (var kernelSize in kernelSizes)
+        {
+            using var kernel = Cv2.GetStructuringElement(MorphShapes.Ellipse, new Size(kernelSize, kernelSize));
+            using var opened = new Mat();
+            Cv2.MorphologyEx(sourceMask, opened, MorphTypes.Open, kernel);
+            var openedBody = TryFindLargestContour(opened);
+            if (openedBody is null || openedBody.Length < 3)
+            {
+                continue;
+            }
+
+            using var openedBodyMask = new Mat(roi.Height, roi.Width, MatType.CV_8UC1, Scalar.Black);
+            Cv2.FillPoly(openedBodyMask, new[] { openedBody }, Scalar.White);
+            var recoveryKernelSize = NormalizeOddKernelSize(Math.Max(3, kernelSize / 3));
+            using var recoveryKernel = Cv2.GetStructuringElement(
+                MorphShapes.Ellipse,
+                new Size(recoveryKernelSize, recoveryKernelSize));
+            using var recoveryMask = new Mat();
+            using var recovered = new Mat();
+            Cv2.Dilate(openedBodyMask, recoveryMask, recoveryKernel);
+            Cv2.BitwiseAnd(sourceMask, recoveryMask, recovered);
+
+            foreach (var localCleaned in new[] { openedBody, TryFindLargestContour(recovered) })
+            {
+                if (localCleaned is null || localCleaned.Length < 3)
+                {
+                    continue;
+                }
+
+                var cleaned = localCleaned
+                    .Select(point => new Point(point.X + roi.X, point.Y + roi.Y))
+                    .ToArray();
+                var cleanedMetrics = CalculateContourMetrics(cleaned);
+                if (!IsSafeConnectedArtifactRemoval(original, cleanedMetrics, minimumDimension))
+                {
+                    continue;
+                }
+
+                var score = ScoreConnectedArtifactRemoval(original, cleanedMetrics);
+                if (score > bestScore)
+                {
+                    bestScore = score;
+                    bestContour = cleaned;
+                }
+            }
+        }
+
+        return RemoveLocalizedRadialArtifacts(bestContour, imageSize);
+    }
+
+    private static Point[] RemoveLocalizedRadialArtifacts(Point[] contour, Size imageSize)
+    {
+        if (contour.Length < 3)
+        {
+            return contour;
+        }
+
+        var original = CalculateContourMetrics(contour);
+        var minimumDimension = Math.Min(original.Width, original.Height);
+        var axisRatio = original.Width / Math.Max(original.Height, 0.0001);
+        if (minimumDimension < 80.0 || axisRatio > 1.10 || original.Circularity < 0.78)
+        {
+            return contour;
+        }
+
+        var bounds = Cv2.BoundingRect(contour);
+        var roi = ExpandRect(bounds, padding: 16, imageSize);
+        var localContour = contour
+            .Select(point => new Point(point.X - roi.X, point.Y - roi.Y))
+            .ToArray();
+        var localCenterX = original.CenterX - roi.X;
+        var localCenterY = original.CenterY - roi.Y;
+
+        using var sourceMask = new Mat(roi.Height, roi.Width, MatType.CV_8UC1, Scalar.Black);
+        Cv2.FillPoly(sourceMask, new[] { localContour }, Scalar.White);
+
+        var envelope = BuildRadialEnvelopeMask(
+            roi.Size,
+            localCenterX,
+            localCenterY,
+            BuildLocalizedRadialArtifactCaps(localContour, localCenterX, localCenterY, minimumDimension));
+        using (envelope)
+        using (var cleanedMask = new Mat())
+        {
+            Cv2.BitwiseAnd(sourceMask, envelope, cleanedMask);
+            var localCleaned = TryFindLargestContour(cleanedMask);
+            if (localCleaned is null || localCleaned.Length < 3)
+            {
+                return contour;
+            }
+
+            var cleaned = localCleaned
+                .Select(point => new Point(point.X + roi.X, point.Y + roi.Y))
+                .ToArray();
+            var cleanedMetrics = CalculateContourMetrics(cleaned);
+            if (!IsSafeLocalizedRadialArtifactRemoval(original, cleanedMetrics, minimumDimension))
+            {
+                return contour;
+            }
+
+            return cleaned;
+        }
+    }
+
+    private static float[] BuildLocalizedRadialArtifactCaps(
+        IReadOnlyList<Point> contour,
+        double centerX,
+        double centerY,
+        double minimumDimension)
+    {
+        var signature = BuildRadiusSignature(
+            contour,
+            centerX,
+            centerY,
+            ArtifactRemovalRadiusSampleCount,
+            smooth: false);
+        var caps = signature.ToArray();
+        MedianFilterCircularSignatureInPlace(caps, radius: 45);
+        SmoothCircularAverageSignatureInPlace(caps, radius: 10);
+        var padding = Math.Max(6.0, minimumDimension * 0.006);
+        for (var index = 0; index < caps.Length; index++)
+        {
+            caps[index] += (float)padding;
+        }
+
+        return caps;
+    }
+
+    private static Mat BuildRadialEnvelopeMask(
+        Size size,
+        double centerX,
+        double centerY,
+        IReadOnlyList<float> radiusCaps)
+    {
+        var envelope = new Mat(size.Height, size.Width, MatType.CV_8UC1, Scalar.Black);
+        if (radiusCaps.Count < 3)
+        {
+            return envelope;
+        }
+
+        var points = new Point[radiusCaps.Count];
+        for (var index = 0; index < radiusCaps.Count; index++)
+        {
+            var angle = index * Math.PI * 2.0 / radiusCaps.Count;
+            var x = centerX + Math.Cos(angle) * radiusCaps[index];
+            var y = centerY + Math.Sin(angle) * radiusCaps[index];
+            points[index] = new Point(
+                Math.Clamp((int)Math.Round(x), 0, size.Width - 1),
+                Math.Clamp((int)Math.Round(y), 0, size.Height - 1));
+        }
+
+        Cv2.FillPoly(envelope, new[] { points }, Scalar.White);
+        return envelope;
+    }
+
+    private static IEnumerable<int> BuildArtifactRemovalKernelSizes(double minimumDimension)
+    {
+        var sizes = new[]
+            {
+                minimumDimension * 0.006,
+                minimumDimension * 0.010,
+                minimumDimension * 0.014,
+                minimumDimension * 0.018,
+                minimumDimension * 0.024,
+                minimumDimension * 0.032,
+                minimumDimension * 0.042,
+                minimumDimension * 0.054,
+                minimumDimension * 0.068
+            }
+            .Select(size => NormalizeOddKernelSize((int)Math.Round(size)))
+            .Where(size => size >= 5)
+            .Distinct()
+            .OrderBy(size => size);
+
+        foreach (var size in sizes)
+        {
+            yield return size;
+        }
+    }
+
+    private static bool IsSafeConnectedArtifactRemoval(
+        ContourMetrics original,
+        ContourMetrics cleaned,
+        double minimumDimension)
+    {
+        var areaRatio = cleaned.Area / Math.Max(original.Area, 0.0001);
+        if (areaRatio is < 0.94 or > 1.002)
+        {
+            return false;
+        }
+
+        var centerShift = Distance(original.CenterX, original.CenterY, cleaned.CenterX, cleaned.CenterY);
+        if (centerShift > Math.Max(4.0, minimumDimension * 0.025))
+        {
+            return false;
+        }
+
+        if (CalculateRatioDifference(cleaned.Width, original.Width) > 0.035 ||
+            CalculateRatioDifference(cleaned.Height, original.Height) > 0.035)
+        {
+            return false;
+        }
+
+        return cleaned.Perimeter < original.Perimeter &&
+            cleaned.Circularity >= original.Circularity * 0.98;
+    }
+
+    private static bool IsSafeLocalizedRadialArtifactRemoval(
+        ContourMetrics original,
+        ContourMetrics cleaned,
+        double minimumDimension)
+    {
+        var areaRatio = cleaned.Area / Math.Max(original.Area, 0.0001);
+        if (areaRatio is < 0.985 or > 1.002)
+        {
+            return false;
+        }
+
+        var centerShift = Distance(original.CenterX, original.CenterY, cleaned.CenterX, cleaned.CenterY);
+        if (centerShift > Math.Max(4.0, minimumDimension * 0.008))
+        {
+            return false;
+        }
+
+        if (CalculateRatioDifference(cleaned.Width, original.Width) > 0.020 ||
+            CalculateRatioDifference(cleaned.Height, original.Height) > 0.020)
+        {
+            return false;
+        }
+
+        return cleaned.Perimeter < original.Perimeter &&
+            cleaned.Circularity >= original.Circularity * 0.99;
+    }
+
+    private static double ScoreConnectedArtifactRemoval(ContourMetrics original, ContourMetrics cleaned)
+    {
+        var perimeterReduction = (original.Perimeter - cleaned.Perimeter) / Math.Max(original.Perimeter, 0.0001);
+        var circularityGain = (cleaned.Circularity - original.Circularity) / Math.Max(original.Circularity, 0.0001);
+        var areaLoss = (original.Area - cleaned.Area) / Math.Max(original.Area, 0.0001);
+        if (perimeterReduction <= 0.0 && circularityGain <= 0.0)
+        {
+            return 0.0;
+        }
+
+        return perimeterReduction * 4.0 + Math.Max(circularityGain, 0.0) - areaLoss * 2.0;
+    }
+
+    private static Point[]? TryFindLargestContour(Mat mask)
+    {
+        Cv2.FindContours(
+            mask,
+            out Point[][] contours,
+            out _,
+            RetrievalModes.External,
+            ContourApproximationModes.ApproxSimple);
+        return contours
+            .Select(contour => new { Contour = contour, Area = Math.Abs(Cv2.ContourArea(contour)) })
+            .OrderByDescending(candidate => candidate.Area)
+            .FirstOrDefault()
+            ?.Contour;
+    }
+
+    private static ContourMetrics CalculateContourMetrics(Point[] contour)
+    {
+        var area = Math.Abs(Cv2.ContourArea(contour));
+        var perimeter = Cv2.ArcLength(contour, closed: true);
+        var moments = Cv2.Moments(contour);
+        var centerX = Math.Abs(moments.M00) < 0.0001 ? 0.0 : moments.M10 / moments.M00;
+        var centerY = Math.Abs(moments.M00) < 0.0001 ? 0.0 : moments.M01 / moments.M00;
+        var shape = Cv2.MinAreaRect(contour);
+        var width = Math.Max(shape.Size.Width, shape.Size.Height);
+        var height = Math.Max(Math.Min(shape.Size.Width, shape.Size.Height), 0.0001);
+        var circularity = perimeter <= 0.0
+            ? 0.0
+            : 4.0 * Math.PI * area / (perimeter * perimeter);
+        return new ContourMetrics(area, perimeter, centerX, centerY, width, height, circularity);
+    }
+
+    private static Rect ExpandRect(Rect rect, int padding, Size imageSize)
+    {
+        var x = Math.Max(rect.X - padding, 0);
+        var y = Math.Max(rect.Y - padding, 0);
+        var right = Math.Min(rect.Right + padding, imageSize.Width);
+        var bottom = Math.Min(rect.Bottom + padding, imageSize.Height);
+        return new Rect(x, y, Math.Max(right - x, 1), Math.Max(bottom - y, 1));
+    }
+
+    private static int NormalizeOddKernelSize(int size)
+    {
+        var normalized = Math.Max(size, 3);
+        return normalized % 2 == 0 ? normalized + 1 : normalized;
     }
 
     private static IEnumerable<ContourCandidate> FindContourCandidates(
@@ -902,6 +1233,15 @@ public sealed class ContourFeatureExtractor
         double Height,
         double FillRatio,
         bool TouchesBorder);
+
+    private sealed record ContourMetrics(
+        double Area,
+        double Perimeter,
+        double CenterX,
+        double CenterY,
+        double Width,
+        double Height,
+        double Circularity);
 }
 
 public sealed record ContourFeatureExtraction(
