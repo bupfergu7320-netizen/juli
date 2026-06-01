@@ -340,12 +340,20 @@ public sealed class HikCameraService : ICameraService
         }
 
         var entry = new MyCamera.MVCC_ENUMENTRY { nValue = value.nCurValue };
-        if (camera.MV_CC_GetEnumEntrySymbolic_NET(key, ref entry) != MyCamera.MV_OK)
+        try
         {
-            return value.nCurValue.ToString(CultureInfo.InvariantCulture);
+            if (camera.MV_CC_GetEnumEntrySymbolic_NET(key, ref entry) == MyCamera.MV_OK)
+            {
+                return Clean(Convert.ToString(entry.chSymbolic));
+            }
+        }
+        catch (EntryPointNotFoundException)
+        {
+            // Older MVS runtimes can read the enum value but do not export the
+            // symbolic-name helper. The numeric value is enough for diagnostics.
         }
 
-        return Clean(Convert.ToString(entry.chSymbolic));
+        return value.nCurValue.ToString(CultureInfo.InvariantCulture);
     }
 
     private CameraDeviceInfo ResolveDevice(IReadOnlyList<CameraDeviceInfo> devices, string serialNumberOrIndex)
