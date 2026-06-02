@@ -58,7 +58,7 @@ public sealed class ContourFeatureExtractor
         var radiusSignal = CalculateRadiusSignalPixels(radiusSignature);
         var normalizedRadiusSignature = NormalizeRadiusSignature(radiusSignature);
         var normalizedRadiusSignal = CalculateRadiusSignalPixels(normalizedRadiusSignature);
-        var sampledContourPoints = BuildSampledContourPoints(contour, offset, maximumPointCount: 720);
+        var sampledContourPoints = BuildSampledContourPoints(contour, offset, maximumPointCount: 1440);
         var pca = CalculatePca(contour);
         var ellipse = CalculateEllipseAxis(contour);
         var axisFeature = BuildAxisFeature(pca, ellipse);
@@ -379,8 +379,10 @@ public sealed class ContourFeatureExtractor
         using var sourceMask = new Mat(roi.Height, roi.Width, MatType.CV_8UC1, Scalar.Black);
         Cv2.FillPoly(sourceMask, new[] { localContour }, Scalar.White);
 
-        Point[] bestContour = contour;
-        var bestScore = 0.0;
+        Point[]? bestOpenedContour = null;
+        var bestOpenedSelectionScore = double.PositiveInfinity;
+        Point[]? bestRecoveredContour = null;
+        var bestRecoveredSelectionScore = double.PositiveInfinity;
         foreach (var kernelSize in kernelSizes)
         {
             using var kernel = Cv2.GetStructuringElement(MorphShapes.Ellipse, new Size(kernelSize, kernelSize));
@@ -394,7 +396,7 @@ public sealed class ContourFeatureExtractor
 
             using var openedBodyMask = new Mat(roi.Height, roi.Width, MatType.CV_8UC1, Scalar.Black);
             Cv2.FillPoly(openedBodyMask, new[] { openedBody }, Scalar.White);
-            var recoveryKernelSize = NormalizeOddKernelSize(Math.Max(3, kernelSize / 3));
+            var recoveryKernelSize = NormalizeOddKernelSize(Math.Max(3, kernelSize / 5));
             using var recoveryKernel = Cv2.GetStructuringElement(
                 MorphShapes.Ellipse,
                 new Size(recoveryKernelSize, recoveryKernelSize));
@@ -403,35 +405,182 @@ public sealed class ContourFeatureExtractor
             Cv2.Dilate(openedBodyMask, recoveryMask, recoveryKernel);
             Cv2.BitwiseAnd(sourceMask, recoveryMask, recovered);
 
-            foreach (var localCleaned in new[] { openedBody, TryFindLargestContour(recovered) })
-            {
-                if (localCleaned is null || localCleaned.Length < 3)
-                {
-                    continue;
-                }
-
-                var cleaned = localCleaned
-                    .Select(point => new Point(point.X + roi.X, point.Y + roi.Y))
-                    .ToArray();
-                var cleanedMetrics = CalculateContourMetrics(cleaned);
-                if (!IsSafeConnectedArtifactRemoval(original, cleanedMetrics, minimumDimension))
-                {
-                    continue;
-                }
-
-                var score = ScoreConnectedArtifactRemoval(original, cleanedMetrics);
-                if (score > bestScore)
-                {
-                    bestScore = score;
-                    bestContour = cleaned;
-                }
-            }
+            TryUseArtifactRemovalCandidate(
+                openedBody,
+                openedBodyMask,
+                sourceMask,
+                roi,
+                original,
+                minimumDimension,
+                ref bestOpenedContour,
+                ref bestOpenedSelectionScore);
+            TryUseArtifactRemovalCandidate(
+                TryFindLargestContour(recovered),
+                recovered,
+                sourceMask,
+                roi,
+                original,
+                minimumDimension,
+                ref bestRecoveredContour,
+                ref bestRecoveredSelectionScore);
         }
 
-        return RemoveLocalizedRadialArtifacts(bestContour, imageSize);
+        return bestOpenedContour is not null
+            ? bestOpenedContour
+            : bestRecoveredContour is not null
+                ? bestRecoveredContour
+                : RemoveLocalizedRadialArtifacts(contour, imageSize);
     }
 
-    private static Point[] RemoveLocalizedRadialArtifacts(Point[] contour, Size imageSize)
+    private static void TryUseArtifactRemovalCandidate(
+        Point[]? localContour,
+        Mat candidateMask,
+        Mat sourceMask,
+        Rect roi,
+        ContourMetrics original,
+        double minimumDimension,
+        ref Point[]? bestContour,
+        ref double bestSelectionScore)
+    {
+        if (!TryBuildSafeConnectedArtifactCandidate(localContour, roi, original, minimumDimension, out var cleaned, out _))
+        {
+            return;
+        }
+
+        var profile = AnalyzeRemovedContourArtifacts(sourceMask, candidateMask, minimumDimension);
+        if (!TryCalculateMainContourSelectionScore(original, cleaned, profile, out var selectionScore) ||
+            selectionScore >= bestSelectionScore)
+        {
+            return;
+        }
+
+        bestSelectionScore = selectionScore;
+        bestContour = cleaned;
+    }
+
+    private static bool TryCalculateMainContourSelectionScore(
+        ContourMetrics original,
+        Point[] candidate,
+        ContourArtifactRemovalProfile removalProfile,
+        out double score)
+    {
+        var metrics = CalculateContourMetrics(candidate);
+        var areaLoss = (original.Area - metrics.Area) / Math.Max(original.Area, 0.0001);
+        var widthDiff = CalculateRatioDifference(metrics.Width, original.Width);
+        var heightDiff = CalculateRatioDifference(metrics.Height, original.Height);
+        var perimeterReduction = (original.Perimeter - metrics.Perimeter) / Math.Max(original.Perimeter, 0.0001);
+        score = double.PositiveInfinity;
+        var removesVisibleAttachment = areaLoss >= 0.0007 && perimeterReduction >= 0.032;
+        var localizedAttachment =
+            removalProfile.SignificantComponentCount > 0 &&
+            removalProfile.LargestAreaShare >= 0.30 &&
+            removalProfile.LargestExtentRatio <= 0.85 &&
+            (removalProfile.SignificantComponentCount <= 12 || removalProfile.LargestAreaShare >= 0.50);
+        if (!removesVisibleAttachment || !localizedAttachment)
+        {
+            return false;
+        }
+
+        score = areaLoss * 12.0 +
+            widthDiff * 3.0 +
+            heightDiff * 3.0 +
+            removalProfile.LargestExtentRatio * 0.10 -
+            Math.Min(perimeterReduction, 0.08);
+        return true;
+    }
+
+    private static ContourArtifactRemovalProfile AnalyzeRemovedContourArtifacts(
+        Mat sourceMask,
+        Mat candidateMask,
+        double minimumDimension)
+    {
+        using var candidateNot = new Mat();
+        using var removed = new Mat();
+        Cv2.BitwiseNot(candidateMask, candidateNot);
+        Cv2.BitwiseAnd(sourceMask, candidateNot, removed);
+        using var labels = new Mat();
+        using var stats = new Mat();
+        using var centroids = new Mat();
+        var count = Cv2.ConnectedComponentsWithStats(
+            removed,
+            labels,
+            stats,
+            centroids,
+            PixelConnectivity.Connectivity8,
+            MatType.CV_32S);
+        var minimumComponentArea = Math.Max(16, minimumDimension * minimumDimension * 0.00002);
+        var significantArea = 0;
+        var significantCount = 0;
+        var largestArea = 0;
+        var largestExtent = 0.0;
+        for (var label = 1; label < count; label++)
+        {
+            var area = stats.At<int>(label, (int)ConnectedComponentsTypes.Area);
+            if (area < minimumComponentArea)
+            {
+                continue;
+            }
+
+            significantArea += area;
+            significantCount++;
+            if (area <= largestArea)
+            {
+                continue;
+            }
+
+            var width = stats.At<int>(label, (int)ConnectedComponentsTypes.Width);
+            var height = stats.At<int>(label, (int)ConnectedComponentsTypes.Height);
+            largestArea = area;
+            largestExtent = Math.Max(width, height) / Math.Max(minimumDimension, 0.0001);
+        }
+
+        var largestShare = significantArea <= 0
+            ? 0.0
+            : largestArea / (double)significantArea;
+        return new ContourArtifactRemovalProfile(
+            significantCount,
+            largestShare,
+            largestExtent);
+    }
+
+    private static bool TryBuildSafeConnectedArtifactCandidate(
+        Point[]? localContour,
+        Rect roi,
+        ContourMetrics original,
+        double minimumDimension,
+        out Point[] cleaned,
+        out double score)
+    {
+        cleaned = Array.Empty<Point>();
+        score = 0.0;
+        if (localContour is null || localContour.Length < 3)
+        {
+            return false;
+        }
+
+        var candidate = localContour
+            .Select(point => new Point(point.X + roi.X, point.Y + roi.Y))
+            .ToArray();
+        var metrics = CalculateContourMetrics(candidate);
+        if (!IsSafeConnectedArtifactRemoval(original, metrics, minimumDimension))
+        {
+            return false;
+        }
+
+        var candidateScore = ScoreConnectedArtifactRemoval(original, metrics);
+        if (candidateScore <= 0.0)
+        {
+            return false;
+        }
+
+        cleaned = candidate;
+        score = candidateScore;
+        return true;
+    }
+
+    private static Point[] RemoveLocalizedRadialArtifacts(
+        Point[] contour,
+        Size imageSize)
     {
         if (contour.Length < 3)
         {
@@ -441,7 +590,7 @@ public sealed class ContourFeatureExtractor
         var original = CalculateContourMetrics(contour);
         var minimumDimension = Math.Min(original.Width, original.Height);
         var axisRatio = original.Width / Math.Max(original.Height, 0.0001);
-        if (minimumDimension < 80.0 || axisRatio > 1.10 || original.Circularity < 0.78)
+        if (minimumDimension < 80.0 || axisRatio > 1.04 || original.Circularity < 0.84)
         {
             return contour;
         }
@@ -498,9 +647,9 @@ public sealed class ContourFeatureExtractor
             ArtifactRemovalRadiusSampleCount,
             smooth: false);
         var caps = signature.ToArray();
-        MedianFilterCircularSignatureInPlace(caps, radius: 45);
-        SmoothCircularAverageSignatureInPlace(caps, radius: 10);
-        var padding = Math.Max(6.0, minimumDimension * 0.006);
+        MedianFilterCircularSignatureInPlace(caps, radius: 90);
+        SmoothCircularAverageSignatureInPlace(caps, radius: 12);
+        var padding = Math.Max(8.0, minimumDimension * 0.008);
         for (var index = 0; index < caps.Length; index++)
         {
             caps[index] += (float)padding;
@@ -548,7 +697,9 @@ public sealed class ContourFeatureExtractor
                 minimumDimension * 0.032,
                 minimumDimension * 0.042,
                 minimumDimension * 0.054,
-                minimumDimension * 0.068
+                minimumDimension * 0.068,
+                minimumDimension * 0.086,
+                minimumDimension * 0.110
             }
             .Select(size => NormalizeOddKernelSize((int)Math.Round(size)))
             .Where(size => size >= 5)
@@ -567,19 +718,19 @@ public sealed class ContourFeatureExtractor
         double minimumDimension)
     {
         var areaRatio = cleaned.Area / Math.Max(original.Area, 0.0001);
-        if (areaRatio is < 0.94 or > 1.002)
+        if (areaRatio is < 0.900 or > 1.002)
         {
             return false;
         }
 
         var centerShift = Distance(original.CenterX, original.CenterY, cleaned.CenterX, cleaned.CenterY);
-        if (centerShift > Math.Max(4.0, minimumDimension * 0.025))
+        if (centerShift > Math.Max(6.0, minimumDimension * 0.080))
         {
             return false;
         }
 
-        if (CalculateRatioDifference(cleaned.Width, original.Width) > 0.035 ||
-            CalculateRatioDifference(cleaned.Height, original.Height) > 0.035)
+        if (CalculateRatioDifference(cleaned.Width, original.Width) > 0.140 ||
+            CalculateRatioDifference(cleaned.Height, original.Height) > 0.080)
         {
             return false;
         }
@@ -594,25 +745,25 @@ public sealed class ContourFeatureExtractor
         double minimumDimension)
     {
         var areaRatio = cleaned.Area / Math.Max(original.Area, 0.0001);
-        if (areaRatio is < 0.985 or > 1.002)
+        if (areaRatio is < 0.975 or > 1.002)
         {
             return false;
         }
 
         var centerShift = Distance(original.CenterX, original.CenterY, cleaned.CenterX, cleaned.CenterY);
-        if (centerShift > Math.Max(4.0, minimumDimension * 0.008))
+        if (centerShift > Math.Max(5.0, minimumDimension * 0.012))
         {
             return false;
         }
 
-        if (CalculateRatioDifference(cleaned.Width, original.Width) > 0.020 ||
-            CalculateRatioDifference(cleaned.Height, original.Height) > 0.020)
+        if (CalculateRatioDifference(cleaned.Width, original.Width) > 0.030 ||
+            CalculateRatioDifference(cleaned.Height, original.Height) > 0.030)
         {
             return false;
         }
 
         return cleaned.Perimeter < original.Perimeter &&
-            cleaned.Circularity >= original.Circularity * 0.99;
+            cleaned.Circularity >= original.Circularity * 0.985;
     }
 
     private static double ScoreConnectedArtifactRemoval(ContourMetrics original, ContourMetrics cleaned)
@@ -1242,6 +1393,12 @@ public sealed class ContourFeatureExtractor
         double Width,
         double Height,
         double Circularity);
+
+    private sealed record ContourArtifactRemovalProfile(
+        int SignificantComponentCount,
+        double LargestAreaShare,
+        double LargestExtentRatio);
+
 }
 
 public sealed record ContourFeatureExtraction(

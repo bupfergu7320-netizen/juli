@@ -10,12 +10,32 @@ internal static class ContourFeatureExtractorCandidateTests
     [ModuleInitializer]
     internal static void Run()
     {
+        if (IsDiagnosticCommand())
+        {
+            return;
+        }
+
         VerifyFixtureTouchingBorderDoesNotBecomePartContour();
         VerifyDarkPartOnBrightBackgroundUsesPartContour();
         VerifyReferenceFeatureSelectsPartOverLargerInteriorFixture();
         VerifyDetachedSmallCylinderDoesNotMovePartCenter();
         VerifyConnectedFixtureArtifactIsTrimmedFromPartContour();
+        VerifyLocalizedBrightAttachmentSnapsBackToRealEdge();
+        VerifySmallEdgeTabCanBeTrimmedAsAttachment();
+        VerifyRectangularPartKeepsRealCorners();
         VerifyProductionReferenceRejectsLargerCurrentFixture();
+    }
+
+    private static bool IsDiagnosticCommand()
+    {
+        var args = Environment.GetCommandLineArgs();
+        return args.Any(arg =>
+            string.Equals(arg, "field-contour", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(arg, "field-contour-debug", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(arg, "field-contour-artifacts", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(arg, "field-contour-stages", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(arg, "field-contour-diff", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(arg, "synthetic-contour", StringComparison.OrdinalIgnoreCase));
     }
 
     private static void VerifyFixtureTouchingBorderDoesNotBecomePartContour()
@@ -131,6 +151,88 @@ internal static class ContourFeatureExtractorCandidateTests
         AssertNear(cleanFeature.CenterYPixel, pollutedFeature.CenterYPixel, 3.5, "connected artifact center y");
         AssertNear(cleanFeature.AreaPixels, pollutedFeature.AreaPixels, cleanFeature.AreaPixels * 0.035, "connected artifact area");
         AssertLessThan(pollutedFeature.RadiusSignalPixels, 5.0, "connected artifact radius signal");
+    }
+
+    private static void VerifyLocalizedBrightAttachmentSnapsBackToRealEdge()
+    {
+        using var clean = new Mat(new Size(720, 620), MatType.CV_8UC1, Scalar.Black);
+        Cv2.Ellipse(
+            clean,
+            new Point(345, 310),
+            new Size(165, 136),
+            angle: -4,
+            startAngle: 0,
+            endAngle: 360,
+            Scalar.FromRgb(178, 178, 178),
+            thickness: -1);
+
+        using var polluted = clean.Clone();
+        Cv2.Ellipse(
+            polluted,
+            new Point(516, 352),
+            new Size(34, 84),
+            angle: -3,
+            startAngle: 0,
+            endAngle: 360,
+            Scalar.FromRgb(238, 238, 238),
+            thickness: -1);
+        Cv2.Line(polluted, new Point(499, 272), new Point(497, 434), Scalar.FromRgb(78, 78, 78), thickness: 4);
+
+        var cleanFeature = Extract(clean);
+        var pollutedFeature = Extract(polluted);
+
+        AssertNear(cleanFeature.CenterXPixel, pollutedFeature.CenterXPixel, 4.0, "localized attachment center x");
+        AssertNear(cleanFeature.CenterYPixel, pollutedFeature.CenterYPixel, 4.0, "localized attachment center y");
+        AssertNear(cleanFeature.AreaPixels, pollutedFeature.AreaPixels, cleanFeature.AreaPixels * 0.040, "localized attachment area");
+        AssertLessThan(pollutedFeature.WidthPixels, cleanFeature.WidthPixels * 1.035, "localized attachment width");
+    }
+
+    private static void VerifySmallEdgeTabCanBeTrimmedAsAttachment()
+    {
+        using var clean = new Mat(new Size(720, 620), MatType.CV_8UC1, Scalar.Black);
+        Cv2.Ellipse(
+            clean,
+            new Point(330, 310),
+            new Size(142, 116),
+            angle: 0,
+            startAngle: 0,
+            endAngle: 360,
+            Scalar.FromRgb(178, 178, 178),
+            thickness: -1);
+
+        using var part = clean.Clone();
+        Cv2.Rectangle(part, new Rect(454, 298, 36, 24), Scalar.FromRgb(178, 178, 178), thickness: -1);
+        Cv2.Ellipse(
+            part,
+            new Point(492, 310),
+            new Size(16, 22),
+            angle: 0,
+            startAngle: 0,
+            endAngle: 360,
+            Scalar.FromRgb(178, 178, 178),
+            thickness: -1);
+
+        var cleanFeature = Extract(clean);
+        var feature = Extract(part);
+
+        AssertNear(cleanFeature.CenterXPixel, feature.CenterXPixel, 4.0, "edge tab center x trimmed");
+        AssertNear(cleanFeature.CenterYPixel, feature.CenterYPixel, 4.0, "edge tab center y trimmed");
+        AssertNear(cleanFeature.AreaPixels, feature.AreaPixels, cleanFeature.AreaPixels * 0.040, "edge tab area trimmed");
+        AssertLessThan(feature.WidthPixels, cleanFeature.WidthPixels * 1.035, "edge tab width trimmed");
+    }
+
+    private static void VerifyRectangularPartKeepsRealCorners()
+    {
+        using var image = new Mat(new Size(760, 640), MatType.CV_8UC1, Scalar.Black);
+        Cv2.Rectangle(image, new Rect(210, 190, 290, 240), Scalar.White, thickness: -1);
+
+        var feature = Extract(image);
+
+        AssertNear(354.5, feature.CenterXPixel, 3.0, "rectangular part center x");
+        AssertNear(309.5, feature.CenterYPixel, 3.0, "rectangular part center y");
+        AssertNear(290.0, feature.WidthPixels, 5.0, "rectangular part width");
+        AssertNear(240.0, feature.HeightPixels, 5.0, "rectangular part height");
+        AssertNear(69_600.0, feature.AreaPixels, 2_500.0, "rectangular part area");
     }
 
     private static void VerifyProductionReferenceRejectsLargerCurrentFixture()

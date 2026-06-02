@@ -53,12 +53,62 @@ if (args.Length > 2 &&
 }
 
 if (args.Length > 1 &&
+    string.Equals(args[0], "synthetic-contour", StringComparison.OrdinalIgnoreCase))
+{
+    var outputDirectory = args.Length > 2
+        ? args[2]
+        : Path.Combine(@"D:\JuliMvsCalibrationPlcChangeover", "DATA", "ContourDiagnostics", DateTime.Now.ToString("yyyyMMdd-HHmmss"));
+    FieldContourOverlay.RunSynthetic(args[1], outputDirectory);
+    return;
+}
+
+if (args.Length > 1 &&
     string.Equals(args[0], "field-contour", StringComparison.OrdinalIgnoreCase))
 {
     var outputDirectory = args.Length > 2
         ? args[2]
         : Path.Combine(@"D:\JuliMvsCalibrationPlcChangeover", "DATA", "ContourDiagnostics", DateTime.Now.ToString("yyyyMMdd-HHmmss"));
     FieldContourOverlay.Run(args[1], outputDirectory);
+    return;
+}
+
+if (args.Length > 1 &&
+    string.Equals(args[0], "field-contour-debug", StringComparison.OrdinalIgnoreCase))
+{
+    var outputDirectory = args.Length > 2
+        ? args[2]
+        : Path.Combine(@"D:\JuliMvsCalibrationPlcChangeover", "DATA", "ContourDiagnostics", DateTime.Now.ToString("yyyyMMdd-HHmmss"));
+    FieldContourOverlay.RunDebug(args[1], outputDirectory);
+    return;
+}
+
+if (args.Length > 1 &&
+    string.Equals(args[0], "field-contour-artifacts", StringComparison.OrdinalIgnoreCase))
+{
+    var outputDirectory = args.Length > 2
+        ? args[2]
+        : Path.Combine(@"D:\JuliMvsCalibrationPlcChangeover", "DATA", "ContourDiagnostics", DateTime.Now.ToString("yyyyMMdd-HHmmss"));
+    FieldContourOverlay.RunArtifactCandidates(args[1], outputDirectory);
+    return;
+}
+
+if (args.Length > 1 &&
+    string.Equals(args[0], "field-contour-stages", StringComparison.OrdinalIgnoreCase))
+{
+    var outputDirectory = args.Length > 2
+        ? args[2]
+        : Path.Combine(@"D:\JuliMvsCalibrationPlcChangeover", "DATA", "ContourDiagnostics", DateTime.Now.ToString("yyyyMMdd-HHmmss"));
+    FieldContourOverlay.RunArtifactStages(args[1], outputDirectory);
+    return;
+}
+
+if (args.Length > 1 &&
+    string.Equals(args[0], "field-contour-diff", StringComparison.OrdinalIgnoreCase))
+{
+    var outputDirectory = args.Length > 2
+        ? args[2]
+        : Path.Combine(@"D:\JuliMvsCalibrationPlcChangeover", "DATA", "ContourDiagnostics", DateTime.Now.ToString("yyyyMMdd-HHmmss"));
+    FieldContourOverlay.RunArtifactDiff(args[1], outputDirectory);
     return;
 }
 
