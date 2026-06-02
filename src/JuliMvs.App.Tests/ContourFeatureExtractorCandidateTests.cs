@@ -20,6 +20,7 @@ internal static class ContourFeatureExtractorCandidateTests
         VerifyReferenceFeatureSelectsPartOverLargerInteriorFixture();
         VerifyDetachedSmallCylinderDoesNotMovePartCenter();
         VerifyConnectedFixtureArtifactIsTrimmedFromPartContour();
+        VerifySmallConnectedArtifactDoesNotErodeMainRightEdge();
         VerifyLocalizedBrightAttachmentSnapsBackToRealEdge();
         VerifySmallEdgeTabCanBeTrimmedAsAttachment();
         VerifyRectangularPartKeepsRealCorners();
@@ -153,6 +154,35 @@ internal static class ContourFeatureExtractorCandidateTests
         AssertLessThan(pollutedFeature.RadiusSignalPixels, 5.0, "connected artifact radius signal");
     }
 
+    private static void VerifySmallConnectedArtifactDoesNotErodeMainRightEdge()
+    {
+        using var clean = new Mat(new Size(980, 920), MatType.CV_8UC1, Scalar.Black);
+        Cv2.Ellipse(
+            clean,
+            new Point(486, 462),
+            new Size(356, 332),
+            angle: -2,
+            startAngle: 0,
+            endAngle: 360,
+            Scalar.FromRgb(190, 190, 190),
+            thickness: -1);
+
+        using var polluted = clean.Clone();
+        Cv2.Rectangle(polluted, new Rect(817, 583, 64, 34), Scalar.FromRgb(190, 190, 190), thickness: -1);
+        Cv2.Circle(polluted, new Point(875, 602), 24, Scalar.FromRgb(190, 190, 190), thickness: -1);
+
+        var cleanFeature = Extract(clean);
+        var pollutedFeature = Extract(polluted);
+        var cleanRightEdge = FindRightEdgeNearCenter(cleanFeature);
+        var pollutedRightEdge = FindRightEdgeNearCenter(pollutedFeature);
+
+        AssertNear(cleanRightEdge, pollutedRightEdge, 2.5, "small connected artifact right edge preserved");
+        AssertNear(cleanFeature.CenterXPixel, pollutedFeature.CenterXPixel, 3.0, "small connected artifact center x");
+        AssertNear(cleanFeature.CenterYPixel, pollutedFeature.CenterYPixel, 3.0, "small connected artifact center y");
+        AssertNear(cleanFeature.AreaPixels, pollutedFeature.AreaPixels, cleanFeature.AreaPixels * 0.006, "small connected artifact area");
+        AssertLessThan(pollutedFeature.WidthPixels, cleanFeature.WidthPixels * 1.010, "small connected artifact width");
+    }
+
     private static void VerifyLocalizedBrightAttachmentSnapsBackToRealEdge()
     {
         using var clean = new Mat(new Size(720, 620), MatType.CV_8UC1, Scalar.Black);
@@ -262,6 +292,15 @@ internal static class ContourFeatureExtractorCandidateTests
         AssertNear(260.0, referencedFeature.CenterYPixel, 6.0, "production reference center y");
         AssertLessThan(referencedFeature.AreaPixels, 16_000.0, "production reference area");
         AssertGreaterThan(Math.Abs(unreferencedFeature.CenterXPixel - referencedFeature.CenterXPixel), 120.0, "production reference changed candidate");
+    }
+
+    private static double FindRightEdgeNearCenter(ContourFeatureExtraction feature)
+    {
+        return feature.ContourPoints
+            .Where(point => Math.Abs(point.Y - feature.CenterYPixel) <= 16.0)
+            .Select(point => point.X)
+            .DefaultIfEmpty(double.NegativeInfinity)
+            .Max();
     }
 
     private static ContourFeatureExtraction Extract(Mat image)
