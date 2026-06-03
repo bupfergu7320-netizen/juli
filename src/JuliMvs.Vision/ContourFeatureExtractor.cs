@@ -403,7 +403,7 @@ public sealed class ContourFeatureExtractor
             using var recoveryMask = new Mat();
             using var recovered = new Mat();
             Cv2.Dilate(openedBodyMask, recoveryMask, recoveryKernel);
-            Cv2.BitwiseAnd(sourceMask, recoveryMask, recovered);
+            BuildFilteredRecoveredMask(sourceMask, openedBodyMask, recoveryMask, minimumDimension, recovered);
 
             var openedAccepted = TryUseArtifactRemovalCandidate(
                 openedBody,
@@ -430,11 +430,121 @@ public sealed class ContourFeatureExtractor
                 ref bestRecoveredSelectionScore);
         }
 
-        return bestRecoveredContour is not null
-            ? bestRecoveredContour
-            : bestOpenedContour is not null
-                ? bestOpenedContour
-                : RemoveLocalizedRadialArtifacts(contour, imageSize);
+        var artifactCleaned = SelectConnectedArtifactRemovalResult(
+            contour,
+            bestOpenedContour,
+            bestRecoveredContour,
+            imageSize);
+        return ReferenceEquals(artifactCleaned, contour)
+            ? artifactCleaned
+            : RemoveLocalizedRadialArtifacts(artifactCleaned, imageSize);
+    }
+
+    private static Point[] SelectConnectedArtifactRemovalResult(
+        Point[] originalContour,
+        Point[]? openedContour,
+        Point[]? recoveredContour,
+        Size imageSize)
+    {
+        if (openedContour is null && recoveredContour is null)
+        {
+            return RemoveLocalizedRadialArtifacts(originalContour, imageSize);
+        }
+
+        if (openedContour is null)
+        {
+            return recoveredContour!;
+        }
+
+        if (recoveredContour is null)
+        {
+            return openedContour;
+        }
+
+        var original = CalculateContourMetrics(originalContour);
+        var opened = CalculateContourMetrics(openedContour);
+        var recovered = CalculateContourMetrics(recoveredContour);
+        var openedAreaLoss = (original.Area - opened.Area) / Math.Max(original.Area, 0.0001);
+        var recoveredAreaLoss = (original.Area - recovered.Area) / Math.Max(original.Area, 0.0001);
+        var openedOnlyLosesSmallBoundaryBand =
+            openedAreaLoss <= Math.Max(0.006, recoveredAreaLoss + 0.003);
+        var openedRemovesMoreFixtureTrace =
+            opened.Perimeter <= recovered.Perimeter * 0.985 ||
+            opened.Circularity >= recovered.Circularity * 1.025;
+
+        return openedOnlyLosesSmallBoundaryBand && openedRemovesMoreFixtureTrace
+            ? openedContour
+            : recoveredContour;
+    }
+
+    private static void BuildFilteredRecoveredMask(
+        Mat sourceMask,
+        Mat openedBodyMask,
+        Mat recoveryMask,
+        double minimumDimension,
+        Mat recovered)
+    {
+        using var rawRecovered = new Mat();
+        using var openedNot = new Mat();
+        using var restoredBand = new Mat();
+        Cv2.BitwiseAnd(sourceMask, recoveryMask, rawRecovered);
+        Cv2.BitwiseNot(openedBodyMask, openedNot);
+        Cv2.BitwiseAnd(rawRecovered, openedNot, restoredBand);
+
+        openedBodyMask.CopyTo(recovered);
+        using var bodyContactKernel = Cv2.GetStructuringElement(MorphShapes.Rect, new Size(3, 3));
+        using var bodyContactMask = new Mat();
+        Cv2.Dilate(openedBodyMask, bodyContactMask, bodyContactKernel);
+        using var labels = new Mat();
+        using var stats = new Mat();
+        using var centroids = new Mat();
+        var count = Cv2.ConnectedComponentsWithStats(
+            restoredBand,
+            labels,
+            stats,
+            centroids,
+            PixelConnectivity.Connectivity8,
+            MatType.CV_32S);
+        for (var label = 1; label < count; label++)
+        {
+            var area = stats.At<int>(label, (int)ConnectedComponentsTypes.Area);
+            var width = stats.At<int>(label, (int)ConnectedComponentsTypes.Width);
+            var height = stats.At<int>(label, (int)ConnectedComponentsTypes.Height);
+            using var componentMask = new Mat();
+            using var contactMask = new Mat();
+            Cv2.InRange(labels, new Scalar(label), new Scalar(label), componentMask);
+            Cv2.BitwiseAnd(componentMask, bodyContactMask, contactMask);
+            var contactPixels = Cv2.CountNonZero(contactMask);
+            if (!ShouldRestoreRecoveredComponent(area, width, height, contactPixels, minimumDimension))
+            {
+                continue;
+            }
+
+            Cv2.BitwiseOr(recovered, componentMask, recovered);
+        }
+    }
+
+    private static bool ShouldRestoreRecoveredComponent(
+        int area,
+        int width,
+        int height,
+        int contactPixels,
+        double minimumDimension)
+    {
+        var shortSide = Math.Min(width, height);
+        var longSide = Math.Max(width, height);
+        var aspect = longSide / Math.Max(shortSide, 1.0);
+        var contactRatio = contactPixels / Math.Max(area, 1.0);
+        var thinBoundaryWidth = Math.Max(6.0, minimumDimension * 0.012);
+        var tinyEdgeSpeckArea = Math.Max(24.0, minimumDimension * minimumDimension * 0.00001);
+        if (area <= tinyEdgeSpeckArea)
+        {
+            return shortSide <= thinBoundaryWidth * 1.25 && contactRatio >= 0.18;
+        }
+
+        return shortSide <= thinBoundaryWidth &&
+            aspect >= 2.8 &&
+            contactRatio >= 0.18;
     }
 
     private static bool TryUseArtifactRemovalCandidate(
@@ -517,11 +627,13 @@ public sealed class ContourFeatureExtractor
             return false;
         }
 
-        score = areaLoss * 12.0 +
-            widthDiff * 3.0 +
-            heightDiff * 3.0 +
+        var circularityGain = (metrics.Circularity - original.Circularity) / Math.Max(original.Circularity, 0.0001);
+        score = areaLoss * 4.0 +
+            widthDiff * 8.0 +
+            heightDiff * 8.0 +
             removalProfile.LargestExtentRatio * 0.10 -
-            Math.Min(perimeterReduction, 0.08);
+            Math.Min(perimeterReduction * 3.0, 0.18) -
+            Math.Min(Math.Max(circularityGain, 0.0), 0.16);
         return true;
     }
 

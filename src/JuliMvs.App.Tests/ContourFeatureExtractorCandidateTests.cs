@@ -21,6 +21,7 @@ internal static class ContourFeatureExtractorCandidateTests
         VerifyDetachedSmallCylinderDoesNotMovePartCenter();
         VerifyConnectedFixtureArtifactIsTrimmedFromPartContour();
         VerifySmallConnectedArtifactDoesNotErodeMainRightEdge();
+        VerifyNarrowBridgeFixturePollutionDoesNotPullRightContour();
         VerifyLocalizedBrightAttachmentSnapsBackToRealEdge();
         VerifySmallEdgeTabCanBeTrimmedAsAttachment();
         VerifyRectangularPartKeepsRealCorners();
@@ -181,6 +182,36 @@ internal static class ContourFeatureExtractorCandidateTests
         AssertNear(cleanFeature.CenterYPixel, pollutedFeature.CenterYPixel, 3.0, "small connected artifact center y");
         AssertNear(cleanFeature.AreaPixels, pollutedFeature.AreaPixels, cleanFeature.AreaPixels * 0.006, "small connected artifact area");
         AssertLessThan(pollutedFeature.WidthPixels, cleanFeature.WidthPixels * 1.010, "small connected artifact width");
+    }
+
+    private static void VerifyNarrowBridgeFixturePollutionDoesNotPullRightContour()
+    {
+        using var clean = new Mat(new Size(980, 920), MatType.CV_8UC1, Scalar.Black);
+        Cv2.Ellipse(
+            clean,
+            new Point(486, 462),
+            new Size(356, 332),
+            angle: -2,
+            startAngle: 0,
+            endAngle: 360,
+            Scalar.FromRgb(190, 190, 190),
+            thickness: -1);
+
+        using var polluted = clean.Clone();
+        Cv2.Rectangle(polluted, new Rect(828, 572, 12, 136), Scalar.FromRgb(190, 190, 190), thickness: -1);
+        Cv2.Rectangle(polluted, new Rect(818, 694, 72, 28), Scalar.FromRgb(190, 190, 190), thickness: -1);
+        Cv2.Circle(polluted, new Point(886, 710), 22, Scalar.FromRgb(190, 190, 190), thickness: -1);
+
+        var cleanFeature = Extract(clean);
+        var pollutedFeature = Extract(polluted);
+        var cleanRightEdge = FindRightEdgeNearCenter(cleanFeature);
+        var pollutedRightEdge = FindRightEdgeNearCenter(pollutedFeature);
+
+        AssertNear(cleanRightEdge, pollutedRightEdge, 4.0, "narrow bridge pollution right edge");
+        AssertNear(cleanFeature.CenterXPixel, pollutedFeature.CenterXPixel, 3.5, "narrow bridge pollution center x");
+        AssertNear(cleanFeature.CenterYPixel, pollutedFeature.CenterYPixel, 3.5, "narrow bridge pollution center y");
+        AssertNear(cleanFeature.AreaPixels, pollutedFeature.AreaPixels, cleanFeature.AreaPixels * 0.008, "narrow bridge pollution area");
+        AssertLessThan(pollutedFeature.WidthPixels, cleanFeature.WidthPixels * 1.012, "narrow bridge pollution width");
     }
 
     private static void VerifyLocalizedBrightAttachmentSnapsBackToRealEdge()
