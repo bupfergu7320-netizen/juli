@@ -761,12 +761,7 @@ public partial class MainWindow
         try
         {
             var featureStopwatch = Stopwatch.StartNew();
-            var activeParameters = ReadVisionParameters();
-            var referenceFeature = GetProductionContourReferenceFeature();
-            var feature = _contourFeatureExtractor.Extract(
-                image,
-                activeParameters,
-                referenceFeature: referenceFeature);
+            var feature = _contourFeatureExtractor.Extract(image, ReadVisionParameters());
             featureStopwatch.Stop();
             timings.DetectPartMilliseconds += featureStopwatch.ElapsedMilliseconds;
             var frontBack = AnalyzeContourFrontBack(feature, timings);
@@ -788,22 +783,6 @@ public partial class MainWindow
         {
             return new ContourJudgmentAnalysis($"判断: 外轮廓分析失败，原因={ex.Message}", null, null);
         }
-    }
-
-    private ContourFeatureExtraction? GetProductionContourReferenceFeature()
-    {
-        if (_bypassLogTemplateFeature is null)
-        {
-            return null;
-        }
-
-        if (!string.IsNullOrWhiteSpace(_bypassLogTemplateProductName) &&
-            !string.Equals(_bypassLogTemplateProductName, _currentProductName.Trim(), StringComparison.OrdinalIgnoreCase))
-        {
-            return null;
-        }
-
-        return _bypassLogTemplateFeature;
     }
 
     private ContourFrontBackAnalysis AnalyzeContourFrontBack(
