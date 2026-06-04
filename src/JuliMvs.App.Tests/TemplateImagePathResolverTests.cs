@@ -13,6 +13,18 @@ using System.Text.Json;
 using JuliMvs.App.Tests;
 
 if (args.Length > 0 &&
+    string.Equals(args[0], "contour-debug", StringComparison.OrdinalIgnoreCase))
+{
+    if (args.Length < 3)
+    {
+        throw new InvalidOperationException("Usage: contour-debug <image-path> <output-directory>");
+    }
+
+    ContourDebugOverlay.Run(args[1], args[2]);
+    return;
+}
+
+if (args.Length > 0 &&
     string.Equals(args[0], "synthetic-field-images", StringComparison.OrdinalIgnoreCase))
 {
     var firstImagePath = args.Length > 1
@@ -86,6 +98,7 @@ VerifyProductRecipeClearsLegacyFrontBump();
 VerifyBackSideNgDoesNotRequireSelectedFrontBump();
 VerifyContourFeatureExtractorClassifiesStrongEllipse();
 VerifyContourFeatureExtractorKeepsWeakRoundRDetection();
+ContourWatershedBridgeTests.Run();
 VerifyContourRadiusSignatureMatchesRotation();
 VerifyProductionContourReliabilityRejectsFieldAngleJump();
 VerifyProductionContourReliabilityAllowsLowScoreForXyrOutput();

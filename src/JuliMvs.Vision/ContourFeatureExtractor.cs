@@ -25,7 +25,7 @@ public sealed class ContourFeatureExtractor
         using var roiImage = ApplyRoi(gray, parameters.Roi, out var offset);
         using var blurred = Blur(roiImage, parameters.BlurKernelSize);
         using var binary = Threshold(blurred, parameters.BinaryThreshold);
-        var contour = FindLargestContour(binary, parameters);
+        var contour = FindPartContour(binary, parameters);
         var moments = Cv2.Moments(contour);
         if (Math.Abs(moments.M00) < 0.0001)
         {
@@ -85,6 +85,25 @@ public sealed class ContourFeatureExtractor
             ImageHeightPixels: image.Height,
             AxisFeature: axisFeature,
             Strategy: strategy);
+    }
+
+    public IReadOnlyList<Point2d> ExtractDenseContourPoints(
+        Mat image,
+        VisionParameters? parameters = null)
+    {
+        ArgumentNullException.ThrowIfNull(image);
+        if (image.Empty())
+        {
+            throw new InvalidOperationException("Image is empty; cannot extract contour.");
+        }
+
+        parameters ??= VisionParameters.Default;
+        using var gray = ToGray(image);
+        using var roiImage = ApplyRoi(gray, parameters.Roi, out var offset);
+        using var blurred = Blur(roiImage, parameters.BlurKernelSize);
+        using var binary = Threshold(blurred, parameters.BinaryThreshold);
+        var contour = FindPartContour(binary, parameters);
+        return BuildSampledContourPoints(contour, offset, maximumPointCount: int.MaxValue);
     }
 
     public static ContourRadiusMatch MatchRadiusSignature(
@@ -317,6 +336,179 @@ public sealed class ContourFeatureExtractor
         Cv2.MorphologyEx(binary, binary, MorphTypes.Open, smallKernel);
         Cv2.MorphologyEx(binary, binary, MorphTypes.Close, smallKernel);
         return binary;
+    }
+
+    private static Point[] FindPartContour(Mat binary, VisionParameters parameters)
+    {
+        var original = FindLargestContour(binary, parameters);
+        var watershedCandidate = TryExtractOpenedWatershedContour(binary, original, parameters);
+        return watershedCandidate is not null && ShouldUseOpenedWatershedCandidate(original, watershedCandidate)
+            ? watershedCandidate
+            : original;
+    }
+
+    private static Point[]? TryExtractOpenedWatershedContour(
+        Mat binary,
+        Point[] originalContour,
+        VisionParameters parameters)
+    {
+        var originalBounds = Cv2.BoundingRect(originalContour);
+        var minimumDimension = Math.Min(originalBounds.Width, originalBounds.Height);
+        if (minimumDimension < 120)
+        {
+            return null;
+        }
+
+        using var sourceMask = new Mat(binary.Rows, binary.Cols, MatType.CV_8UC1, Scalar.Black);
+        Cv2.DrawContours(sourceMask, new[] { originalContour }, -1, Scalar.White, thickness: -1);
+
+        var kernelSize = NormalizeOddKernelSize(minimumDimension * 0.026, minimum: 9, maximum: 81);
+        using var openKernel = Cv2.GetStructuringElement(MorphShapes.Ellipse, new Size(kernelSize, kernelSize));
+        using var opened = new Mat();
+        Cv2.MorphologyEx(sourceMask, opened, MorphTypes.Open, openKernel);
+        if (Cv2.CountNonZero(opened) <= 0)
+        {
+            return null;
+        }
+
+        using var distance = new Mat();
+        Cv2.DistanceTransform(opened, distance, DistanceTypes.L2, DistanceTransformMasks.Mask5);
+        Cv2.MinMaxLoc(distance, out _, out var distanceMax, out _, out var distanceMaxLocation);
+        if (distanceMax <= 0.0)
+        {
+            return null;
+        }
+
+        using var sureForegroundFloat = new Mat();
+        using var sureForeground = new Mat();
+        Cv2.Threshold(distance, sureForegroundFloat, distanceMax * 0.55, 255.0, ThresholdTypes.Binary);
+        sureForegroundFloat.ConvertTo(sureForeground, MatType.CV_8UC1);
+
+        using var labels = new Mat();
+        var markerCount = Cv2.ConnectedComponents(
+            sureForeground,
+            labels,
+            PixelConnectivity.Connectivity8,
+            MatType.CV_32S);
+        if (markerCount <= 1)
+        {
+            return null;
+        }
+
+        using var markers = new Mat();
+        Cv2.Add(labels, Scalar.All(1), markers);
+        using var backgroundKernel = Cv2.GetStructuringElement(MorphShapes.Ellipse, new Size(kernelSize, kernelSize));
+        using var sureBackground = new Mat();
+        using var unknown = new Mat();
+        Cv2.Dilate(opened, sureBackground, backgroundKernel, iterations: 2);
+        Cv2.Subtract(sureBackground, sureForeground, unknown);
+        markers.SetTo(Scalar.All(0), unknown);
+
+        using var watershedImage = new Mat();
+        Cv2.CvtColor(opened, watershedImage, ColorConversionCodes.GRAY2BGR);
+        Cv2.Watershed(watershedImage, markers);
+
+        var selectedMarker = markers.At<int>(distanceMaxLocation.Y, distanceMaxLocation.X);
+        if (selectedMarker <= 1)
+        {
+            selectedMarker = FindLargestPositiveMarker(markers);
+        }
+
+        if (selectedMarker <= 1)
+        {
+            return null;
+        }
+
+        using var selectedMask = new Mat();
+        Cv2.InRange(markers, new Scalar(selectedMarker), new Scalar(selectedMarker), selectedMask);
+        Cv2.BitwiseAnd(selectedMask, opened, selectedMask);
+        try
+        {
+            return FindLargestContour(selectedMask, parameters);
+        }
+        catch (InvalidOperationException)
+        {
+            return null;
+        }
+    }
+
+    private static bool ShouldUseOpenedWatershedCandidate(Point[] originalContour, Point[] candidateContour)
+    {
+        var original = CalculateContourMetrics(originalContour);
+        var candidate = CalculateContourMetrics(candidateContour);
+        if (original.Area <= 0.0 || candidate.Area <= 0.0)
+        {
+            return false;
+        }
+
+        var minimumDimension = Math.Min(original.Bounds.Width, original.Bounds.Height);
+        var areaLoss = (original.Area - candidate.Area) / original.Area;
+        if (areaLoss <= 0.00005 || areaLoss > 0.035)
+        {
+            return false;
+        }
+
+        var centerShift = Math.Sqrt(
+            Math.Pow(original.CenterX - candidate.CenterX, 2.0) +
+            Math.Pow(original.CenterY - candidate.CenterY, 2.0));
+        if (centerShift > minimumDimension * 0.018)
+        {
+            return false;
+        }
+
+        var widthLoss = Math.Max(0.0, original.Bounds.Width - candidate.Bounds.Width) / Math.Max(original.Bounds.Width, 1.0);
+        var heightLoss = Math.Max(0.0, original.Bounds.Height - candidate.Bounds.Height) / Math.Max(original.Bounds.Height, 1.0);
+        return widthLoss <= 0.035 && heightLoss <= 0.035;
+    }
+
+    private static int NormalizeOddKernelSize(double value, int minimum, int maximum)
+    {
+        var size = (int)Math.Round(value);
+        size = Math.Clamp(size, minimum, maximum);
+        if (size % 2 == 0)
+        {
+            size++;
+        }
+
+        var maximumOdd = maximum % 2 == 0 ? maximum - 1 : maximum;
+        return Math.Min(size, maximumOdd);
+    }
+
+    private static int FindLargestPositiveMarker(Mat markers)
+    {
+        var counts = new Dictionary<int, int>();
+        for (var row = 0; row < markers.Rows; row++)
+        {
+            for (var column = 0; column < markers.Cols; column++)
+            {
+                var marker = markers.At<int>(row, column);
+                if (marker <= 1)
+                {
+                    continue;
+                }
+
+                counts.TryGetValue(marker, out var count);
+                counts[marker] = count + 1;
+            }
+        }
+
+        return counts.Count == 0
+            ? 0
+            : counts.OrderByDescending(pair => pair.Value).First().Key;
+    }
+
+    private static ContourMetrics CalculateContourMetrics(Point[] contour)
+    {
+        var area = Cv2.ContourArea(contour);
+        var bounds = Cv2.BoundingRect(contour);
+        var moments = Cv2.Moments(contour);
+        var centerX = Math.Abs(moments.M00) < 0.0001
+            ? bounds.X + bounds.Width / 2.0
+            : moments.M10 / moments.M00;
+        var centerY = Math.Abs(moments.M00) < 0.0001
+            ? bounds.Y + bounds.Height / 2.0
+            : moments.M01 / moments.M00;
+        return new ContourMetrics(area, bounds, centerX, centerY);
     }
 
     private static Point[] FindLargestContour(Mat binary, VisionParameters parameters)
@@ -722,6 +914,12 @@ public sealed class ContourFeatureExtractor
         var raw = PositiveModulo(left - right, modulo);
         return raw > modulo / 2 ? raw - modulo : raw;
     }
+
+    private sealed record ContourMetrics(
+        double Area,
+        Rect Bounds,
+        double CenterX,
+        double CenterY);
 }
 
 public sealed record ContourFeatureExtraction(
